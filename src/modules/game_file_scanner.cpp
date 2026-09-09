@@ -23,9 +23,8 @@ struct Spec {
 	Sev sev;
 };
 
-// Critical = plugin/loader/game identity (runtime tamper → lockdown + ban on join).
+// Critical = plugin/loader/game identity (log + alert only — NEVER ban players).
 // Watch = configs that admins may edit (log only).
-// NOTE: never mark banned_steamids.json as Critical — AdminPlugin rewrites it on every ban.
 static const Spec kWatchSpecs[] = {
 	{ "addons/anticheat/bin/linuxsteamrt64/anticheat.so", Sev::Critical },
 	{ "addons/anticheat/bin/win64/anticheat.dll", Sev::Critical },
@@ -143,7 +142,6 @@ GameFileSnapshot GameFileScanner::ReadOne(const WatchSpec& spec) const
 		h = Fnv1a64(buf.data(), got);
 	}
 
-	// For large binaries: also sample the last up-to-64KiB so trailing patches are visible.
 	if (snap.size > kMaxHashBytes)
 	{
 		const size_t tail = 64 * 1024;
@@ -156,8 +154,8 @@ GameFileSnapshot GameFileScanner::ReadOne(const WatchSpec& spec) const
 		h = MixHash(h, Fnv1a64(tailBuf.data(), got));
 	}
 
+	// Content + size only (mtime alone changes on touch / copy and caused false lockdowns).
 	h = MixHash(h, snap.size);
-	h = MixHash(h, snap.mtime);
 	snap.hash = h;
 	return snap;
 }
@@ -185,10 +183,9 @@ void GameFileScanner::LogSnapshot(const char* tag, const std::vector<GameFileSna
 		if (s.exists)
 		{
 			++ok;
-			AC_Log("%s file ok %s sev=%d size=%llu mtime=%llu hash=%016llx",
+			AC_Log("%s file ok %s sev=%d size=%llu hash=%016llx",
 				tag, s.relativePath.c_str(), (int)s.severity,
-				(unsigned long long)s.size, (unsigned long long)s.mtime,
-				(unsigned long long)s.hash);
+				(unsigned long long)s.size, (unsigned long long)s.hash);
 		}
 		else
 		{
@@ -218,17 +215,16 @@ void GameFileScanner::DiffAgainstBaseline(const std::vector<GameFileSnapshot>& n
 
 		const GameFileSnapshot& base = it->second;
 
-		// Platform-specific binaries: missing on wrong OS is fine if baseline also missing.
 		if (!base.exists && !s.exists)
 			continue;
 
-		if (base.exists != s.exists || base.size != s.size || base.hash != s.hash || base.mtime != s.mtime)
+		// Compare content hash + size only (ignore mtime drift).
+		if (base.exists != s.exists || base.size != s.size || base.hash != s.hash)
 		{
-			AC_Log("[files] CHANGED %s sev=%d exists %d->%d size %llu->%llu mtime %llu->%llu hash %016llx->%016llx",
+			AC_Log("[files] CHANGED %s sev=%d exists %d->%d size %llu->%llu hash %016llx->%016llx",
 				s.relativePath.c_str(), (int)s.severity,
 				(int)base.exists, (int)s.exists,
 				(unsigned long long)base.size, (unsigned long long)s.size,
-				(unsigned long long)base.mtime, (unsigned long long)s.mtime,
 				(unsigned long long)base.hash, (unsigned long long)s.hash);
 			out.anyChange = true;
 
@@ -247,40 +243,23 @@ bool GameFileScanner::CheckPluginMemoryIntegrity(std::string& reason) const
 	Dl_info info{};
 	if (dladdr(reinterpret_cast<const void*>(&AC_Log), &info) == 0 || !info.dli_fname || !info.dli_fname[0])
 	{
-		reason = "dladdr failed for anticheat module";
-		return false;
+		// Soft fail: do not lock the server — dladdr can fail under some loaders.
+		AC_Log("[files] memory check: dladdr unavailable (ignored)");
+		return true;
 	}
 
-	// Module must still be mapped from disk path containing anticheat.
 	const char* fname = info.dli_fname;
 	if (!strstr(fname, "anticheat"))
 	{
-		reason = std::string("unexpected module mapping: ") + fname;
-		return false;
+		AC_Log("[files] memory check: mapped as %s (ignored, not locking)", fname);
+		return true;
 	}
 
 	struct stat st{};
 	if (stat(fname, &st) != 0)
 	{
-		reason = std::string("mapped module missing on disk: ") + fname;
+		reason = std::string("mapped anticheat module missing on disk: ") + fname;
 		return false;
-	}
-
-	// Compare against baseline anticheat.so if we had one.
-	const char* relLinux = "addons/anticheat/bin/linuxsteamrt64/anticheat.so";
-	auto it = m_baselineByPath.find(relLinux);
-	if (it != m_baselineByPath.end() && it->second.exists)
-	{
-		if (static_cast<uint64_t>(st.st_size) != it->second.size)
-		{
-			reason = "anticheat.so size mismatch (disk vs baseline while mapped)";
-			return false;
-		}
-		if (static_cast<uint64_t>(st.st_mtime) != it->second.mtime)
-		{
-			reason = "anticheat.so replaced on disk while process running";
-			return false;
-		}
 	}
 
 	return true;
@@ -288,13 +267,6 @@ bool GameFileScanner::CheckPluginMemoryIntegrity(std::string& reason) const
 	(void)reason;
 	return true;
 #endif
-}
-
-void GameFileScanner::ApplyCriticalLockdown(const char* reason)
-{
-	m_lockdown = true;
-	m_lockdownReason = reason ? reason : "critical integrity failure";
-	AC_LogCritical("[files] LOCKDOWN active: %s (reject joins + ban)", m_lockdownReason.c_str());
 }
 
 void GameFileScanner::ScanAtStartup()
@@ -321,20 +293,14 @@ void GameFileScanner::ScanAtStartup()
 
 	std::string memReason;
 	if (!CheckPluginMemoryIntegrity(memReason))
-	{
-		AC_LogCritical("[files] memory integrity at startup: %s", memReason.c_str());
-		ApplyCriticalLockdown(memReason.c_str());
-	}
+		AC_LogCritical("[files] memory integrity at startup: %s (log only, no ban)", memReason.c_str());
 }
 
 IntegrityScanResult GameFileScanner::ScanNow(const char* tag)
 {
 	IntegrityScanResult result;
 	if (!m_enabled || !m_gameDir[0])
-	{
-		result.ok = !m_lockdown;
 		return result;
-	}
 
 	AC_Log("[files] scan tag=%s", tag ? tag : "?");
 	const auto now = ReadAll();
@@ -347,13 +313,15 @@ IntegrityScanResult GameFileScanner::ScanNow(const char* tag)
 		result.criticalChange = true;
 		result.anyChange = true;
 		result.reason = memReason;
-		AC_LogCritical("[files] memory integrity FAILED: %s", memReason.c_str());
+		AC_LogCritical("[files] memory integrity FAILED: %s (log only, no ban)", memReason.c_str());
 	}
 
 	if (result.criticalChange)
 	{
 		result.ok = false;
-		ApplyCriticalLockdown(result.reason.empty() ? "critical file/memory change" : result.reason.c_str());
+		m_lastCriticalReason = result.reason.empty() ? "critical file/memory change" : result.reason;
+		AC_LogCritical("[files] CRITICAL change detected: %s (players are NOT banned for this)",
+			m_lastCriticalReason.c_str());
 	}
 	else if (!result.anyChange)
 	{
@@ -368,18 +336,8 @@ IntegrityScanResult GameFileScanner::ScanOnPlayerJoin(uint64_t steamId, const ch
 	AC_Log("[files] join scan steam=%llu name=%s",
 		(unsigned long long)steamId, playerName ? playerName : "");
 
-	IntegrityScanResult result = ScanNow("join");
-	if (result.criticalChange || m_lockdown)
-	{
-		result.ok = false;
-		result.criticalChange = true;
-		if (result.reason.empty())
-			result.reason = m_lockdownReason.empty() ? "critical integrity failure" : m_lockdownReason;
-		AC_LogCritical("[files] CRITICAL on join steam=%llu reason=%s",
-			(unsigned long long)steamId, result.reason.c_str());
-		MarkIntegrityBan(steamId);
-	}
-	return result;
+	// Monitor only — never ban/kick the connecting player for server-side file state.
+	return ScanNow("join");
 }
 
 void GameFileScanner::Tick(float curtime)
@@ -390,15 +348,4 @@ void GameFileScanner::Tick(float curtime)
 		return;
 	m_lastPeriodicScan = curtime;
 	ScanNow("periodic");
-}
-
-bool GameFileScanner::IsSteamIntegrityBanned(uint64_t steamId) const
-{
-	return steamId != 0 && m_integrityBanned.find(steamId) != m_integrityBanned.end();
-}
-
-void GameFileScanner::MarkIntegrityBan(uint64_t steamId)
-{
-	if (steamId)
-		m_integrityBanned.insert(steamId);
 }

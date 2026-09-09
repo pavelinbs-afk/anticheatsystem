@@ -58,30 +58,6 @@ void AntiCheatCore::Shutdown()
 	AC_Log("core shutdown");
 }
 
-bool AntiCheatCore::ShouldRejectConnect(uint64_t steamID, char* rejectReason, size_t rejectLen)
-{
-	if (!m_GameFileScanner || !m_Config.enable_game_file_scan)
-		return false;
-
-	const char* reason = nullptr;
-	if (m_GameFileScanner->IsSteamIntegrityBanned(steamID))
-		reason = "Banned: critical game integrity violation";
-	else if (m_GameFileScanner->IsLockdownActive())
-		reason = m_GameFileScanner->LockdownReason();
-
-	if (!reason)
-		return false;
-
-	if (rejectReason && rejectLen > 0)
-		V_strncpy(rejectReason, reason, (int)rejectLen);
-
-	// Persist ban before they enter the server.
-	AdminBridge_ApplyBan(steamID, "integrity");
-	AC_LogCritical("reject connect steam=%llu reason=%s",
-		(unsigned long long)steamID, reason);
-	return true;
-}
-
 void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name)
 {
 	if (slot < 0 || slot >= AC_MAXPLAYERS || steamID == 0)
@@ -100,26 +76,9 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 	m_PlayerProfiles[steamID] = profile;
 	m_SlotToSteam[slot] = steamID;
 
-	if (!m_GameFileScanner || !m_Config.enable_game_file_scan)
-		return;
-
-	IntegrityScanResult scan = m_GameFileScanner->ScanOnPlayerJoin(steamID, profile->name.c_str());
-	if (!scan.criticalChange && !m_GameFileScanner->IsLockdownActive())
-		return;
-
-	profile->isBanned = true;
-	profile->actionTakenBan = true;
-	AdminBridge_ApplyBan(steamID, profile->name.c_str());
-	AC_LogCritical("integrity ban on join steam=%llu name=%s reason=%s",
-		(unsigned long long)steamID, profile->name.c_str(),
-		scan.reason.empty() ? m_GameFileScanner->LockdownReason() : scan.reason.c_str());
-
-	// Kick immediately — do not let them play while ban bridge runs.
-	if (g_pEngine)
-	{
-		const char* kickMsg = "Critical game file/memory integrity violation";
-		g_pEngine->KickClient(CPlayerSlot(slot), kickMsg, static_cast<ENetworkDisconnectionReason>(15));
-	}
+	// File/memory scan is monitoring only — never ban or kick for server integrity.
+	if (m_GameFileScanner && m_Config.enable_game_file_scan)
+		m_GameFileScanner->ScanOnPlayerJoin(steamID, profile->name.c_str());
 }
 
 void AntiCheatCore::OnPlayerDisconnect(int slot, uint64_t steamID)

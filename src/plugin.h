@@ -22,7 +22,7 @@ public:
 	const char* GetDescription() override	{ return "CS2 server-side anticheat (MetaMod)"; }
 	const char* GetURL() override			{ return ""; }
 	const char* GetLicense() override		{ return "Proprietary"; }
-	const char* GetVersion() override		{ return "1.0.3"; }
+	const char* GetVersion() override		{ return "1.0.5"; }
 	const char* GetDate() override			{ return __DATE__; }
 	const char* GetLogTag() override		{ return "ANTICHEAT"; }
 
@@ -32,7 +32,6 @@ public:
 	int  Hook_LoadEventsFromFile(const char* filename, bool bSearchAll);
 	void Hook_EntitySystemSpawn(int nCount, const EntitySpawnInfo_t* pInfo);
 	void Hook_ClientPutInServer(CPlayerSlot slot, char const* pszName, int type, uint64 xuid);
-	bool Hook_ClientConnect(CPlayerSlot slot, const char* pszName, uint64 xuid, const char* pszNetworkID, bool unk1, CBufferString* pRejectReason);
 	void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID);
 };
 

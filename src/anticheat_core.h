@@ -26,8 +26,6 @@ public:
 	bool Initialize();
 	void Shutdown();
 
-	// ClientConnect: reject before enter if integrity lockdown / prior integrity ban.
-	bool ShouldRejectConnect(uint64_t steamID, char* rejectReason, size_t rejectLen);
 	void OnPlayerConnect(int slot, uint64_t steamID, const char* name);
 	void OnPlayerDisconnect(int slot, uint64_t steamID);
 	void OnPlayerDeath(int attackerSlot, int victimSlot, bool headshot, bool thrusmoke, bool attackerblind, bool noscope, int penetrated);
