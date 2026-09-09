@@ -196,6 +196,7 @@ set(AC_PLUGIN_SRCS
   src/config.cpp
   src/anticheat_core.cpp
   src/integration/admin_bridge.cpp
+  src/integration/backend_client.cpp
   src/modules/aim_analyzer.cpp
   src/modules/wallhack_detector.cpp
   src/modules/movement_analyzer.cpp
@@ -204,6 +205,7 @@ set(AC_PLUGIN_SRCS
   src/modules/suspicion_scorer.cpp
   src/modules/fps_drop_detector.cpp
   src/modules/game_file_scanner.cpp
+  src/modules/shot_tracker.cpp
 )
 
 set(AC_SDK_SRCS

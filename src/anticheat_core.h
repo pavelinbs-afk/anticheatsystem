@@ -18,6 +18,8 @@ class IntegrityChecker;
 class SuspicionScorer;
 class FpsDropDetector;
 class GameFileScanner;
+class ShotTracker;
+class BackendClient;
 
 class AntiCheatCore {
 public:
@@ -29,7 +31,7 @@ public:
 	void OnPlayerConnect(int slot, uint64_t steamID, const char* name);
 	void OnPlayerDisconnect(int slot, uint64_t steamID);
 	void OnPlayerDeath(int attackerSlot, int victimSlot, bool headshot, bool thrusmoke, bool attackerblind, bool noscope, int penetrated);
-	void OnPlayerHurt(int attackerSlot, int victimSlot, float damage);
+	void OnPlayerHurt(int attackerSlot, int victimSlot, float damage, int hitgroup);
 	void OnWeaponFire(int shooterSlot);
 	void OnGameFrame();
 	void OnRoundStart();
@@ -56,8 +58,14 @@ private:
 	std::unique_ptr<SuspicionScorer> m_SuspicionScorer;
 	std::unique_ptr<FpsDropDetector> m_FpsDropDetector;
 	std::unique_ptr<GameFileScanner> m_GameFileScanner;
+	std::unique_ptr<ShotTracker> m_ShotTracker;
+	std::unique_ptr<BackendClient> m_BackendClient;
 
 	void SampleAllPlayers();
 	void ProcessPlayer(PlayerProfile* profile);
 	void CheckAndApplyActions(PlayerProfile* profile);
+	void ProcessBackendResults();
+	void QueueBackendCheck(PlayerProfile* profile);
+	static std::string GetClientIpForSlot(int slot);
+	std::vector<PlayerProfile*> CollectEnemies(PlayerProfile* profile);
 };

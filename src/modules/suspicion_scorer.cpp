@@ -37,6 +37,10 @@ float SuspicionScorer::GetScore(uint64_t steamId)
 
 ScorerAction SuspicionScorer::EvaluatePlayer(PlayerProfile& player)
 {
+	// Already banned this steamid this process lifetime — never re-trigger ban actions.
+	if (banned_.count(player.steamId))
+		return ScorerAction::NONE;
+
 	float score = GetScore(player.steamId);
 
 	if (score >= ban_threshold_)
@@ -95,4 +99,15 @@ void SuspicionScorer::DecayScores(float deltaTime)
 				pair.second.score = 0.0f;
 		}
 	}
+}
+
+bool SuspicionScorer::IsAlreadyBanned(uint64_t steamId) const
+{
+	return steamId != 0 && banned_.count(steamId) > 0;
+}
+
+void SuspicionScorer::MarkBanned(uint64_t steamId)
+{
+	if (steamId)
+		banned_.insert(steamId);
 }

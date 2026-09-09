@@ -56,7 +56,8 @@ public:
 			int attacker = EventSlot(event, "attacker");
 			int victim = EventSlot(event, "userid");
 			float dmg = event->GetFloat("dmg_health");
-			core->OnPlayerHurt(attacker, victim, dmg);
+			int hitgroup = event->GetInt("hitgroup");
+			core->OnPlayerHurt(attacker, victim, dmg, hitgroup);
 			return;
 		}
 

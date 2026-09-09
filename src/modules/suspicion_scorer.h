@@ -32,6 +32,9 @@ public:
 	ScorerAction EvaluatePlayer(PlayerProfile& player);
 	void DecayScores(float deltaTime);
 
+	bool IsAlreadyBanned(uint64_t steamId) const;
+	void MarkBanned(uint64_t steamId);
+
 private:
 	std::unordered_map<uint64_t, PlayerSuspicion> player_scores_;
 	std::unordered_set<uint64_t> reported_;

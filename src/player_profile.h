@@ -37,6 +37,16 @@ struct AcAngle {
     AcAngle(float p, float y, float r) : pitch(p), yaw(y), roll(r) {}
 };
 
+struct ShotRecord {
+    float time = 0.0f;
+    AcAngle angles;
+    float snapDeg = 0.0f;
+    float bestEnemyFov = 999.0f;
+    uint64_t bestEnemySteam = 0;
+    float bestEnemyDist = 0.0f;
+    bool consumedHit = false;
+};
+
 // ============================================================
 // Player Profile — unified data structure for all modules
 // ============================================================
@@ -115,6 +125,16 @@ struct PlayerProfile {
     // Wallhack / pre-aim tracking (FOV lock on enemy)
     int wallAimStreak = 0;
     uint64_t wallAimTargetSteam = 0;
+
+    // Movement / spawn guards (team change, death, join → ignore speed for a bit)
+    int lastTeamNum = 0;
+    float movementIgnoreUntil = 0.0f;
+    bool samplesValid = false;
+    bool statsFlaggedThisSession = false;
+    int untrustedAngleHits = 0;
+
+    // Recent weapon_fire samples for hit matching (advanced aim tracking)
+    std::deque<ShotRecord> recentShots;
 
     // === Timestamps ===
     std::chrono::system_clock::time_point lastViolationTime;

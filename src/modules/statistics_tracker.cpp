@@ -22,21 +22,25 @@ void StatisticsTracker::UpdateStats(PlayerProfile& player, const GameEvent& even
 float StatisticsTracker::AnalyzeSession(PlayerProfile& player)
 {
 	ComputeMetrics(player);
-	float suspicionDelta = 0.0f;
 
-	// Require enough sample size; both KD and HS absurdly high.
-	const int minKills = 12;
+	// CRITICAL: must only flag once per session — previously added score every GameFrame.
+	if (player.statsFlaggedThisSession)
+		return 0.0f;
+
+	const int minKills = 18;
 	if (player.kills >= minKills &&
-		player.kdRatio >= 7.0f &&
-		player.headshotPercentage > 85.0f)
+		player.kdRatio >= 8.0f &&
+		player.headshotPercentage > 90.0f &&
+		player.roundsPlayed >= 8)
 	{
-		suspicionDelta += 12.0f;
-		AC_Log("high stats KD=%.1f HS=%.0f%% kills=%d steam=%llu",
-			player.kdRatio, player.headshotPercentage, player.kills,
+		player.statsFlaggedThisSession = true;
+		AC_Log("high stats KD=%.1f HS=%.0f%% kills=%d rounds=%d steam=%llu",
+			player.kdRatio, player.headshotPercentage, player.kills, player.roundsPlayed,
 			(unsigned long long)player.steamId);
+		return 12.0f;
 	}
 
-	return suspicionDelta;
+	return 0.0f;
 }
 
 HistoricalStats StatisticsTracker::GetHistoricalStats(uint64_t steamId)
@@ -50,13 +54,12 @@ HistoricalStats StatisticsTracker::GetHistoricalStats(uint64_t steamId)
 float StatisticsTracker::CompareWithHistory(PlayerProfile& player)
 {
 	ComputeMetrics(player);
-	if (player.kills < 10 || player.roundsPlayed < 5)
+	if (player.kills < 15 || player.roundsPlayed < 8)
 		return 0.0f;
 
 	HistoricalStats history = GetHistoricalStats(player.steamId);
 	float spikeSuspicion = 0.0f;
 
-	// Only when we have real history (std_dev set from DB). Defaults are weak.
 	if (history.std_dev_kd > 0.1f &&
 		player.kdRatio > history.mean_kd + 3.5f * history.std_dev_kd)
 	{

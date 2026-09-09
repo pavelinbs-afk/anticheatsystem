@@ -38,6 +38,35 @@ static bool JsonFindNumber(const std::string& json, const char* key, double& out
 	return true;
 }
 
+static bool JsonFindString(const std::string& json, const char* key, std::string& out)
+{
+	std::string needle = std::string("\"") + key + "\"";
+	size_t p = json.find(needle);
+	if (p == std::string::npos)
+		return false;
+	p = json.find(':', p);
+	if (p == std::string::npos)
+		return false;
+	++p;
+	while (p < json.size() && (json[p] == ' ' || json[p] == '\t'))
+		++p;
+	if (p >= json.size() || json[p] != '"')
+		return false;
+	++p;
+	out.clear();
+	while (p < json.size() && json[p] != '"')
+	{
+		if (json[p] == '\\' && p + 1 < json.size())
+		{
+			out.push_back(json[p + 1]);
+			p += 2;
+			continue;
+		}
+		out.push_back(json[p++]);
+	}
+	return true;
+}
+
 static bool JsonFindBool(const std::string& json, const char* key, bool& out)
 {
 	std::string needle = std::string("\"") + key + "\"";
@@ -100,6 +129,17 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "fps_max_frame_ms", d)) cfg.fps_max_frame_ms = (float)d;
 	if (JsonFindNumber(json, "fps_spike_stddev_ms", d)) cfg.fps_spike_stddev_ms = (float)d;
 	if (JsonFindNumber(json, "fps_min_spikes", d)) cfg.fps_min_spikes = (int)d;
+	if (JsonFindBool(json, "enable_shot_tracking", b)) cfg.enable_shot_tracking = b;
+	if (JsonFindNumber(json, "shot_hit_window_sec", d)) cfg.shot_hit_window_sec = (float)d;
+	if (JsonFindNumber(json, "shot_aim_fov_deg", d)) cfg.shot_aim_fov_deg = (float)d;
+	if (JsonFindNumber(json, "shot_min_hit_distance", d)) cfg.shot_min_hit_distance = (float)d;
+	if (JsonFindNumber(json, "shot_min_shots_before_score", d)) cfg.shot_min_shots_before_score = (int)d;
+	if (JsonFindBool(json, "enable_backend_check", b)) cfg.enable_backend_check = b;
+	{
+		std::string s;
+		if (JsonFindString(json, "backend_api_url", s)) cfg.backend_api_url = s;
+		if (JsonFindString(json, "backend_api_token", s)) cfg.backend_api_token = s;
+	}
 
 	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f)", filepath.c_str(), cfg.ban_threshold, cfg.report_threshold);
 	return cfg;
