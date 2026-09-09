@@ -1,25 +1,36 @@
 #include "shot_tracker.h"
 #include "../plugin.h"
+#include <cmath>
 
 void ShotTracker::SetConfig(float hitWindowSec, float aimFovDeg, float minHitDistance, int minShotsBeforeScore)
 {
-	m_hitWindowSec = hitWindowSec > 0.05f ? hitWindowSec : 0.35f;
-	m_aimFovDeg = aimFovDeg > 0.1f ? aimFovDeg : 1.25f;
-	m_minHitDistance = minHitDistance > 0.0f ? minHitDistance : 350.0f;
-	m_minShotsBeforeScore = minShotsBeforeScore > 0 ? minShotsBeforeScore : 12;
+	m_hitWindowSec = hitWindowSec > 0.05f ? hitWindowSec : 0.45f;
+	m_aimFovDeg = aimFovDeg > 0.1f ? aimFovDeg : 3.5f;
+	m_minHitDistance = minHitDistance > 0.0f ? minHitDistance : 200.0f;
+	m_minShotsBeforeScore = minShotsBeforeScore > 0 ? minShotsBeforeScore : 2;
 }
 
-void ShotTracker::OnWeaponFire(PlayerProfile& shooter, float curtime, const std::vector<PlayerProfile*>& enemies)
+float ShotTracker::OnWeaponFire(PlayerProfile& shooter, float curtime, const std::vector<PlayerProfile*>& enemies)
 {
 	shooter.shotsFired++;
 
 	ShotRecord rec;
 	rec.time = curtime;
 	rec.angles = shooter.viewAngles;
+	rec.eyePos = shooter.position;
 
 	float dPitch = AngleDifference(shooter.viewAngles.pitch, shooter.lastViewAngles.pitch);
 	float dYaw = AngleDifference(shooter.viewAngles.yaw, shooter.lastViewAngles.yaw);
 	rec.snapDeg = std::sqrt(dPitch * dPitch + dYaw * dYaw);
+
+	if (shooter.hasLastShotAngles)
+	{
+		float sp = AngleDifference(shooter.viewAngles.pitch, shooter.lastShotAngles.pitch);
+		float sy = AngleDifference(shooter.viewAngles.yaw, shooter.lastShotAngles.yaw);
+		rec.snapFromPrevShot = std::sqrt(sp * sp + sy * sy);
+	}
+	shooter.lastShotAngles = shooter.viewAngles;
+	shooter.hasLastShotAngles = true;
 
 	float bestFov = 999.0f;
 	uint64_t bestSteam = 0;
@@ -42,19 +53,48 @@ void ShotTracker::OnWeaponFire(PlayerProfile& shooter, float curtime, const std:
 	rec.bestEnemyDist = bestDist;
 
 	shooter.recentShots.push_back(rec);
-	while (shooter.recentShots.size() > 64)
+	while (shooter.recentShots.size() > 96)
 		shooter.recentShots.pop_front();
 
-	shooter.timeCrosshairOnEnemy = (bestFov < 5.0f) ? 0.001f : 0.0f;
+	if (shooter.shotsFired <= 8 || (shooter.shotsFired % 25) == 0)
+	{
+		AC_Log("shot#%d ang=%.1f/%.1f snap=%.1f bestFov=%.1f dist=%.0f enemies=%d steam=%llu",
+			shooter.shotsFired, shooter.viewAngles.pitch, shooter.viewAngles.yaw,
+			rec.snapDeg, bestFov, bestDist, (int)enemies.size(),
+			(unsigned long long)shooter.steamId);
+	}
+
+	if (bestFov < 4.0f)
+		shooter.timeCrosshairOnEnemy = std::min(shooter.timeCrosshairOnEnemy + 0.05f, 2.0f);
+	else
+		shooter.timeCrosshairOnEnemy = 0.0f;
+
+	float suspicion = 0.0f;
+	const float snap = std::max(rec.snapDeg, rec.snapFromPrevShot);
+
+	// Rage: huge snap that lands ON an enemy at fire time (no need to wait for hurt).
+	if (snap >= 40.0f && bestFov <= 5.0f && bestDist >= 150.0f && !enemies.empty())
+	{
+		suspicion += (snap >= 75.0f) ? 14.0f : 9.0f;
+		AC_Log("RAGE snap-to-target snap=%.1f fov=%.1f dist=%.0f steam=%llu +%.0f",
+			snap, bestFov, bestDist, (unsigned long long)shooter.steamId, suspicion);
+	}
+	else if (snap >= 120.0f)
+	{
+		// Spin / insane flick even if not on target yet
+		suspicion += 6.0f;
+		AC_Log("RAGE snap snap=%.1f steam=%llu +6", snap, (unsigned long long)shooter.steamId);
+	}
+
+	return suspicion;
 }
 
 float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, float damage, int hitgroup, float curtime)
 {
 	(void)damage;
 	float suspicion = 0.0f;
-	const bool head = (hitgroup == 1); // CS2 HITGROUP_HEAD
+	const bool head = (hitgroup == 1 || hitgroup == 8);
 
-	// Find newest unmatched shot aimed near this victim.
 	ShotRecord* matched = nullptr;
 	for (auto it = attacker.recentShots.rbegin(); it != attacker.recentShots.rend(); ++it)
 	{
@@ -62,49 +102,114 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 			continue;
 		if (curtime - it->time > m_hitWindowSec)
 			break;
-		if (it->bestEnemySteam != 0 && it->bestEnemySteam != victim.steamId)
-			continue;
 		matched = &(*it);
 		break;
 	}
 
+	const float distNow = VectorDistance(attacker.position, victim.position);
+
 	if (!matched)
 	{
 		float fov = CalculateFOV(attacker.viewAngles, attacker.position, victim.position);
-		float dist = VectorDistance(attacker.position, victim.position);
-		if (attacker.shotsFired >= m_minShotsBeforeScore && head && fov < m_aimFovDeg && dist >= m_minHitDistance)
+		if (attacker.shotsFired >= 1 && head && fov <= m_aimFovDeg && distNow >= m_minHitDistance)
 		{
 			suspicion += 6.0f;
-			AC_Log("shot-hit aim hs fov=%.2f dist=%.0f steam=%llu",
-				fov, dist, (unsigned long long)attacker.steamId);
+			attacker.aimbotHitStreak++;
+			AC_Log("aim hit (no-shot-rec) hs fov=%.2f dist=%.0f streak=%d steam=%llu",
+				fov, distNow, attacker.aimbotHitStreak, (unsigned long long)attacker.steamId);
+		}
+		else
+		{
+			attacker.aimbotHitStreak = 0;
 		}
 		return suspicion;
 	}
 
 	matched->consumedHit = true;
-	const float fov = matched->bestEnemyFov;
-	const float dist = matched->bestEnemyDist > 0.0f
-		? matched->bestEnemyDist
-		: VectorDistance(attacker.position, victim.position);
-	const float snap = matched->snapDeg;
 
-	if (attacker.shotsFired < m_minShotsBeforeScore)
+	const float fovAtFire = CalculateFOV(matched->angles, matched->eyePos, victim.position);
+	const float distAtFire = VectorDistance(matched->eyePos, victim.position);
+	const float dist = distAtFire > 1.0f ? distAtFire : distNow;
+	const float snap = std::max(matched->snapDeg, matched->snapFromPrevShot);
+
+	// High-confidence rage/silent: score from first shot.
+	const bool highConf = (snap >= 40.0f && fovAtFire <= 5.0f) || (fovAtFire >= m_silentAimFovDeg);
+	if (!highConf && attacker.shotsFired < m_minShotsBeforeScore)
 		return 0.0f;
-
-	if (head && fov <= m_aimFovDeg && dist >= m_minHitDistance)
+	if (dist < m_minHitDistance)
 	{
-		suspicion += 8.0f;
-		if (snap >= 55.0f)
-			suspicion += 3.0f;
-		AC_Log("shot-track hs fov=%.2f snap=%.1f dist=%.0f steam=%llu -> %llu +%.0f",
-			fov, snap, dist,
-			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
+		attacker.aimbotHitStreak = 0;
+		return 0.0f;
 	}
-	else if (fov <= m_aimFovDeg && dist >= m_minHitDistance && snap >= 70.0f)
+
+	// Silent aim: hit while view was clearly NOT on victim
+	if (fovAtFire >= m_silentAimFovDeg)
 	{
-		suspicion += 4.0f;
-		AC_Log("shot-track body fov=%.2f snap=%.1f dist=%.0f steam=%llu +4",
-			fov, snap, dist, (unsigned long long)attacker.steamId);
+		attacker.silentAimHits++;
+		suspicion += head ? 14.0f : 10.0f;
+		AC_Log("SILENT-AIM? fovAtFire=%.1f snap=%.1f hs=%d dist=%.0f hits=%d steam=%llu -> %llu",
+			fovAtFire, snap, (int)head, dist, attacker.silentAimHits,
+			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
+		if (attacker.silentAimHits >= 2)
+			suspicion += 6.0f;
+		attacker.aimbotHitStreak++;
+		return suspicion;
+	}
+
+	// Rage / hard lock: snap onto victim then hit
+	if (snap >= 40.0f && fovAtFire <= 5.0f)
+	{
+		suspicion += head ? 16.0f : 11.0f;
+		attacker.aimbotHitStreak++;
+		AC_Log("RAGE hit snap=%.1f fov=%.2f hs=%d dist=%.0f steam=%llu -> %llu +%.0f",
+			snap, fovAtFire, (int)head, dist,
+			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
+		if (attacker.aimbotHitStreak >= 2)
+			suspicion += 8.0f;
+		return suspicion;
+	}
+
+	if (fovAtFire <= m_aimFovDeg)
+	{
+		if (head)
+		{
+			suspicion += 8.0f;
+			if (snap >= m_snapHitDeg)
+				suspicion += 4.0f;
+			attacker.aimbotHitStreak++;
+			AC_Log("aimbot-like HS fov=%.2f snap=%.1f dist=%.0f streak=%d steam=%llu -> %llu +%.0f",
+				fovAtFire, snap, dist, attacker.aimbotHitStreak,
+				(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
+		}
+		else if (snap >= m_snapHitDeg)
+		{
+			suspicion += 5.0f;
+			attacker.aimbotHitStreak++;
+			AC_Log("aimbot-like snap-hit fov=%.2f snap=%.1f dist=%.0f steam=%llu +5",
+				fovAtFire, snap, dist, (unsigned long long)attacker.steamId);
+		}
+		else
+		{
+			attacker.aimbotHitStreak = 0;
+		}
+	}
+	else if (snap >= (m_snapHitDeg + 15.0f) && fovAtFire <= (m_aimFovDeg + 4.0f) && head)
+	{
+		suspicion += 7.0f;
+		attacker.aimbotHitStreak++;
+		AC_Log("aimbot-like flick HS fov=%.2f snap=%.1f dist=%.0f steam=%llu +7",
+			fovAtFire, snap, dist, (unsigned long long)attacker.steamId);
+	}
+	else
+	{
+		attacker.aimbotHitStreak = 0;
+	}
+
+	if (attacker.aimbotHitStreak >= 3 && (attacker.aimbotHitStreak % 3) == 0)
+	{
+		suspicion += 10.0f;
+		AC_Log("aimbot streak=%d steam=%llu +10",
+			attacker.aimbotHitStreak, (unsigned long long)attacker.steamId);
 	}
 
 	return suspicion;
@@ -113,7 +218,7 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 float ShotTracker::FlushStale(PlayerProfile& shooter, float curtime)
 {
 	while (!shooter.recentShots.empty() &&
-		(curtime - shooter.recentShots.front().time) > (m_hitWindowSec * 4.0f))
+		(curtime - shooter.recentShots.front().time) > (m_hitWindowSec * 5.0f))
 	{
 		shooter.recentShots.pop_front();
 	}

@@ -43,7 +43,7 @@ bool AntiCheatCore::Initialize()
 	m_ShotTracker = std::make_unique<ShotTracker>();
 	m_BackendClient = std::make_unique<BackendClient>();
 
-	m_AimAnalyzer->SetConfig(m_Config.snap_angle_threshold, (float)m_Config.snap_time_threshold_ms, 1.0f, 0.5f);
+	m_AimAnalyzer->SetConfig(m_Config.snap_angle_threshold, (float)m_Config.snap_time_threshold_ms, 3.0f, 0.5f);
 	m_WallhackDetector->SetConfig(m_Config.wh_track_fov_deg, m_Config.wh_min_track_distance, m_Config.wh_streak_ticks);
 	m_MovementAnalyzer->SetConfig(m_Config.speed_threshold, 800.0f);
 	m_FpsDropDetector->SetConfig(m_Config.fps_max_frame_ms, m_Config.fps_spike_stddev_ms, m_Config.fps_min_spikes);
@@ -136,20 +136,49 @@ void AntiCheatCore::ProcessBackendResults()
 	m_BackendClient->PollResults(results);
 	for (const BackendCheckResult& r : results)
 	{
+		if (!r.ok)
+		{
+			AC_Log("backend check failed steam=%llu err=%s",
+				(unsigned long long)r.steamId, r.rawError.c_str());
+			continue;
+		}
+
 		PlayerProfile* profile = GetPlayerProfile(r.steamId);
 		if (!profile)
 			profile = GetPlayerBySlot(r.slot);
 
+		// Backend is source of truth after unban: clear sticky local ban cache.
+		if (!r.steamBanned && !(r.shouldEnforce && r.exactIpLinked > 0))
+		{
+			if (m_SuspicionScorer->IsAlreadyBanned(r.steamId))
+			{
+				m_SuspicionScorer->ClearBanned(r.steamId);
+				AC_Log("backend: steam=%llu clean — cleared local ban cache",
+					(unsigned long long)r.steamId);
+			}
+			if (profile)
+			{
+				profile->isBanned = false;
+				profile->actionTakenBan = false;
+			}
+			if (r.prefixIpLinked > 0)
+			{
+				AC_Log("backend: /24 IP link (log only) steam=%llu links=%d",
+					(unsigned long long)r.steamId, r.prefixIpLinked);
+			}
+			continue;
+		}
+
 		if (r.steamBanned)
 		{
-			// Already banned on backend — mark locally, do NOT re-apply ban.
-			m_SuspicionScorer->MarkBanned(r.steamId);
+			// Active ban on backend — kick only, never re-issue ApplyBan.
 			if (profile)
 			{
 				profile->isBanned = true;
 				profile->actionTakenBan = true;
 			}
-			AC_Log("backend: steam already banned %llu — skip re-ban, kick only",
+			m_SuspicionScorer->MarkBanned(r.steamId);
+			AC_Log("backend: active ban steam=%llu — kick only (no re-ban)",
 				(unsigned long long)r.steamId);
 			if (g_pEngine && profile && profile->slot >= 0)
 			{
@@ -160,40 +189,20 @@ void AntiCheatCore::ProcessBackendResults()
 			continue;
 		}
 
+		// Exact IP shared with another active ban — report only (no auto-ban).
+		// Auto-banning alts by IP caused false bans after unbans / shared NAT.
 		if (r.shouldEnforce && r.exactIpLinked > 0)
 		{
-			// Exact IP shared with an active ban — same as site /bypass 100%.
-			if (m_SuspicionScorer->IsAlreadyBanned(r.steamId))
-			{
-				AC_Log("backend: IP-link enforce skipped (already banned) steam=%llu",
-					(unsigned long long)r.steamId);
-				continue;
-			}
-
-			m_SuspicionScorer->MarkBanned(r.steamId);
-			if (profile)
-			{
-				profile->isBanned = true;
-				profile->actionTakenBan = true;
-				AdminBridge_ApplyBan(r.steamId, profile->name.c_str());
-			}
-			else
-			{
-				AdminBridge_ApplyBan(r.steamId, r.playerName.c_str());
-			}
-			AC_LogCritical("backend IP bypass enforce steam=%llu ip=%s reason=%s",
+			AC_LogCritical("backend IP link steam=%llu ip=%s reason=%s (report only, no auto-ban)",
 				(unsigned long long)r.steamId, r.clientIp.c_str(), r.enforceReason.c_str());
-			continue;
-		}
-
-		if (r.prefixIpLinked > 0)
-		{
-			AC_Log("backend: /24 IP link (report only) steam=%llu links=%d",
-				(unsigned long long)r.steamId, r.prefixIpLinked);
 			if (profile && !profile->actionTakenReport)
 			{
 				profile->actionTakenReport = true;
 				AdminBridge_SendReport(r.steamId, profile->name.c_str());
+			}
+			else if (!profile)
+			{
+				AdminBridge_SendReport(r.steamId, r.playerName.c_str());
 			}
 		}
 	}
@@ -218,12 +227,11 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 	profile->samplesValid = false;
 	profile->lastTeamNum = GetPlayerTeamNum(slot);
 
-	// Restore ban flags if this steam was already auto-banned this uptime.
+	// Do NOT kick from sticky local cache — backend check decides after unban.
+	// Local MarkBanned only blocks duplicate ApplyBan from scoring this uptime.
 	if (m_SuspicionScorer->IsAlreadyBanned(steamID))
 	{
-		profile->isBanned = true;
-		profile->actionTakenBan = true;
-		AC_Log("connect steam=%llu already banned this session — no re-ban",
+		AC_Log("connect steam=%llu had local ban flag — waiting backend re-check (no kick)",
 			(unsigned long long)steamID);
 	}
 
@@ -234,13 +242,6 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 		m_GameFileScanner->ScanOnPlayerJoin(steamID, profile->name.c_str());
 
 	QueueBackendCheck(profile.get());
-
-	if (profile->isBanned && g_pEngine)
-	{
-		g_pEngine->KickClient(CPlayerSlot(slot),
-			"Active anticheat ban",
-			static_cast<ENetworkDisconnectionReason>(15));
-	}
 }
 
 void AntiCheatCore::OnPlayerDisconnect(int slot, uint64_t steamID)
@@ -275,6 +276,15 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 		attacker->kills++;
 		if (headshot)
 			attacker->headshots++;
+
+		float pos[3]{}, ang[3]{}, vel[3]{};
+		if (SamplePlayerState(attacker->slot, pos, ang, vel))
+		{
+			attacker->viewAngles = AcAngle(ang[0], ang[1], ang[2]);
+			attacker->position = AcVec3(pos[0], pos[1], pos[2]);
+		}
+		if (SamplePlayerState(victim->slot, pos, ang, vel))
+			victim->position = AcVec3(pos[0], pos[1], pos[2]);
 
 		const float dist = VectorDistance(attacker->position, victim->position);
 
@@ -324,6 +334,20 @@ void AntiCheatCore::OnPlayerHurt(int attackerSlot, int victimSlot, float damage,
 	if (!m_Config.enable_shot_tracking || !m_ShotTracker)
 		return;
 
+	// Fresh sample at event time — GameFrame angles can be a tick stale.
+	float pos[3]{}, ang[3]{}, vel[3]{};
+	if (SamplePlayerState(attacker->slot, pos, ang, vel))
+	{
+		attacker->lastViewAngles = attacker->viewAngles;
+		attacker->viewAngles = AcAngle(ang[0], ang[1], ang[2]);
+		attacker->position = AcVec3(pos[0], pos[1], pos[2]);
+		attacker->velocity = AcVec3(vel[0], vel[1], vel[2]);
+	}
+	if (SamplePlayerState(victim->slot, pos, ang, vel))
+	{
+		victim->position = AcVec3(pos[0], pos[1], pos[2]);
+	}
+
 	CGlobalVars* gv = GetGlobals();
 	const float curtime = gv ? gv->curtime : 0.0f;
 	float score = m_ShotTracker->OnPlayerHurt(*attacker, *victim, damage, hitgroup, curtime);
@@ -335,7 +359,25 @@ void AntiCheatCore::OnWeaponFire(int shooterSlot)
 {
 	PlayerProfile* shooter = GetPlayerBySlot(shooterSlot);
 	if (!shooter)
+	{
+		static int s_miss = 0;
+		if (shooterSlot >= 0 && s_miss < 15)
+		{
+			++s_miss;
+			AC_Log("weapon_fire slot=%d but no profile (connect/xuid?)", shooterSlot);
+		}
 		return;
+	}
+
+	float pos[3]{}, ang[3]{}, vel[3]{};
+	if (SamplePlayerState(shooter->slot, pos, ang, vel))
+	{
+		shooter->lastViewAngles = shooter->viewAngles;
+		shooter->viewAngles = AcAngle(ang[0], ang[1], ang[2]);
+		shooter->lastPosition = shooter->position;
+		shooter->position = AcVec3(pos[0], pos[1], pos[2]);
+		shooter->velocity = AcVec3(vel[0], vel[1], vel[2]);
+	}
 
 	if (!m_Config.enable_shot_tracking || !m_ShotTracker)
 	{
@@ -346,7 +388,9 @@ void AntiCheatCore::OnWeaponFire(int shooterSlot)
 	CGlobalVars* gv = GetGlobals();
 	const float curtime = gv ? gv->curtime : 0.0f;
 	auto enemies = CollectEnemies(shooter);
-	m_ShotTracker->OnWeaponFire(*shooter, curtime, enemies);
+	float score = m_ShotTracker->OnWeaponFire(*shooter, curtime, enemies);
+	if (score > 0.0f)
+		m_SuspicionScorer->AddScore(shooter->steamId, "ShotTracker", score, "Rage aim snap");
 }
 
 void AntiCheatCore::SampleAllPlayers()
@@ -432,12 +476,6 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 {
 	if (!profile || profile->isBanned || profile->actionTakenBan)
 		return;
-	if (m_SuspicionScorer->IsAlreadyBanned(profile->steamId))
-	{
-		profile->isBanned = true;
-		profile->actionTakenBan = true;
-		return;
-	}
 
 	const bool alive = IsPlayerAlive(profile->slot);
 	const int team = GetPlayerTeamNum(profile->slot);
@@ -494,16 +532,12 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 
 void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 {
-	if (!profile)
+	if (!profile || profile->actionTakenBan)
 		return;
 
-	// Never issue a second ban for the same steamid.
-	if (m_SuspicionScorer->IsAlreadyBanned(profile->steamId) || profile->actionTakenBan)
-	{
-		profile->isBanned = true;
-		profile->actionTakenBan = true;
+	// Local MarkBanned = already issued ApplyBan this uptime → never call it again.
+	if (m_SuspicionScorer->IsAlreadyBanned(profile->steamId))
 		return;
-	}
 
 	ScorerAction action = m_SuspicionScorer->EvaluatePlayer(*profile);
 

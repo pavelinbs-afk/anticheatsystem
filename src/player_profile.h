@@ -40,7 +40,9 @@ struct AcAngle {
 struct ShotRecord {
     float time = 0.0f;
     AcAngle angles;
-    float snapDeg = 0.0f;
+    AcVec3 eyePos;
+    float snapDeg = 0.0f;          // angle delta vs previous tick at fire
+    float snapFromPrevShot = 0.0f;  // angle delta vs previous weapon_fire
     float bestEnemyFov = 999.0f;
     uint64_t bestEnemySteam = 0;
     float bestEnemyDist = 0.0f;
@@ -135,6 +137,10 @@ struct PlayerProfile {
 
     // Recent weapon_fire samples for hit matching (advanced aim tracking)
     std::deque<ShotRecord> recentShots;
+    AcAngle lastShotAngles;
+    bool hasLastShotAngles = false;
+    int aimbotHitStreak = 0;
+    int silentAimHits = 0;
 
     // === Timestamps ===
     std::chrono::system_clock::time_point lastViolationTime;

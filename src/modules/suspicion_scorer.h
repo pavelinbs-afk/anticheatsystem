@@ -34,6 +34,7 @@ public:
 
 	bool IsAlreadyBanned(uint64_t steamId) const;
 	void MarkBanned(uint64_t steamId);
+	void ClearBanned(uint64_t steamId);
 
 private:
 	std::unordered_map<uint64_t, PlayerSuspicion> player_scores_;

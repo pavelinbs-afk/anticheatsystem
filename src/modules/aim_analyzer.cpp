@@ -3,15 +3,15 @@
 #include <cmath>
 
 AimAnalyzer::AimAnalyzer()
-	: m_snapThreshold(120.0f), m_minReactionTimeMs(50.0f), m_maxFov(1.0f), m_minSmoothness(0.5f)
+	: m_snapThreshold(75.0f), m_minReactionTimeMs(50.0f), m_maxFov(3.0f), m_minSmoothness(0.5f)
 {
 }
 
 void AimAnalyzer::SetConfig(float snapThreshold, float minReactionTimeMs, float maxFov, float minSmoothness)
 {
-	m_snapThreshold = snapThreshold;
+	m_snapThreshold = snapThreshold > 0.0f ? snapThreshold : 75.0f;
 	m_minReactionTimeMs = minReactionTimeMs;
-	m_maxFov = maxFov;
+	m_maxFov = maxFov > 0.0f ? maxFov : 3.0f;
 	m_minSmoothness = minSmoothness;
 }
 
@@ -20,14 +20,13 @@ float AimAnalyzer::Analyze(PlayerProfile& player, float deltaTime)
 	(void)deltaTime;
 	float suspicionDelta = 0.0f;
 
-	// SMAC / TB AntiCheat: untrusted angles (impossible eye angles).
 	const float pitch = player.viewAngles.pitch;
 	const float roll = player.viewAngles.roll;
 	if (!std::isfinite(pitch) || !std::isfinite(player.viewAngles.yaw) || !std::isfinite(roll) ||
 		pitch < -89.5f || pitch > 89.5f || std::fabs(roll) > 2.0f)
 	{
 		player.untrustedAngleHits++;
-		if (player.untrustedAngleHits >= 3)
+		if (player.untrustedAngleHits >= 2)
 		{
 			suspicionDelta += 11.0f;
 			player.untrustedAngleHits = 0;
@@ -42,11 +41,17 @@ float AimAnalyzer::Analyze(PlayerProfile& player, float deltaTime)
 	float dYaw = AngleDifference(player.viewAngles.yaw, player.lastViewAngles.yaw);
 	float snapAngle = std::sqrt(dPitch * dPitch + dYaw * dYaw);
 
-	// Only extreme snaps (spinbot-like). Normal CS2 flicks are often 40–90°.
+	// Keep history for pattern analysis
+	player.angleDeltaHistory.push_back(snapAngle);
+	while (player.angleDeltaHistory.size() > 64)
+		player.angleDeltaHistory.pop_front();
+
+	// Rage snap (blatant)
 	if (snapAngle > m_snapThreshold)
 	{
-		suspicionDelta += 2.0f;
-		AC_Log("aim snap %.1f° steam=%llu", snapAngle, (unsigned long long)player.steamId);
+		suspicionDelta += (snapAngle >= 120.0f) ? 8.0f : 4.0f;
+		AC_Log("aim snap %.1f° steam=%llu +%.0f",
+			snapAngle, (unsigned long long)player.steamId, suspicionDelta);
 	}
 
 	return suspicionDelta;
@@ -57,22 +62,36 @@ float AimAnalyzer::OnPlayerShoot(PlayerProfile& shooter, PlayerProfile& victim, 
 	float suspicionDelta = 0.0f;
 	float fov = CalculateFOV(shooter.viewAngles, shooter.position, victim.position);
 
-	// Aim kill: need sample size + perfect FOV + mid/long range (close HS is normal).
-	if (headshot && fov < m_maxFov && shooter.kills >= 8 && distance >= 400.0f)
+	// Prefer FOV from last shot record if present (angles at fire time).
+	if (!shooter.recentShots.empty())
 	{
-		suspicionDelta += 11.0f;
-		AC_Log("aim-kill hs fov=%.2f dist=%.0f steam=%llu",
-			fov, distance, (unsigned long long)shooter.steamId);
+		const ShotRecord& last = shooter.recentShots.back();
+		float fovFire = CalculateFOV(last.angles, last.eyePos, victim.position);
+		if (fovFire < fov)
+			fov = fovFire;
 	}
 
-	// Trigger-like: only if we actually tracked crosshair time (currently rare).
-	if (shooter.timeCrosshairOnEnemy > 0.0f &&
-		shooter.timeCrosshairOnEnemy < (m_minReactionTimeMs / 1000.0f) &&
-		shooter.kills >= 8 && headshot && distance >= 300.0f)
+	if (headshot && distance >= 200.0f)
 	{
-		suspicionDelta += 12.0f;
-		AC_Log("trigger-like reaction %.0fms steam=%llu",
-			shooter.timeCrosshairOnEnemy * 1000.0f, (unsigned long long)shooter.steamId);
+		if (fov <= m_maxFov)
+		{
+			suspicionDelta += 11.0f;
+			AC_Log("aim-kill hs fov=%.2f dist=%.0f steam=%llu +11",
+				fov, distance, (unsigned long long)shooter.steamId);
+		}
+		else if (fov >= 12.0f)
+		{
+			// Kill while not looking at victim — classic silent aim.
+			suspicionDelta += 14.0f;
+			AC_Log("aim-kill SILENT fov=%.1f dist=%.0f steam=%llu +14",
+				fov, distance, (unsigned long long)shooter.steamId);
+		}
+	}
+	else if (!headshot && distance >= 250.0f && fov <= m_maxFov && shooter.kills >= 2)
+	{
+		suspicionDelta += 6.0f;
+		AC_Log("aim-kill lock fov=%.2f dist=%.0f steam=%llu +6",
+			fov, distance, (unsigned long long)shooter.steamId);
 	}
 
 	return suspicionDelta;

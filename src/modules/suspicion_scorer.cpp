@@ -12,18 +12,18 @@ void SuspicionScorer::SetThresholds(float monitor, float warn, float report, flo
 
 void SuspicionScorer::AddScore(uint64_t steamId, const std::string& module, float score, const std::string& reason)
 {
-	if (score <= 0.0f || banned_.count(steamId))
+	if (score <= 0.0f || steamId == 0)
 		return;
 
+	// Still accumulate/log even if already banned — detection visibility matters.
+	// ApplyBan is gated separately in CheckAndApplyActions.
 	auto now = std::chrono::steady_clock::now();
 	player_scores_[steamId].score += score;
 	player_scores_[steamId].last_update = now;
 
-	// After the final admin warning at 50+, any further score gain arms the auto-ban.
-	if (admin_warned_.count(steamId))
+	if (admin_warned_.count(steamId) && !banned_.count(steamId))
 		continued_after_warn_.insert(steamId);
 
-	// Server-only log — never shown to the suspicious player.
 	AC_Log("score +%.1f [%s] steam=%llu reason=%s total=%.1f",
 		score, module.c_str(), (unsigned long long)steamId, reason.c_str(),
 		player_scores_[steamId].score);
@@ -110,4 +110,18 @@ void SuspicionScorer::MarkBanned(uint64_t steamId)
 {
 	if (steamId)
 		banned_.insert(steamId);
+}
+
+void SuspicionScorer::ClearBanned(uint64_t steamId)
+{
+	if (!steamId)
+		return;
+	banned_.erase(steamId);
+	// Allow a fresh detection cycle after an admin unban.
+	admin_warned_.erase(steamId);
+	continued_after_warn_.erase(steamId);
+	reported_.erase(steamId);
+	auto it = player_scores_.find(steamId);
+	if (it != player_scores_.end())
+		it->second.score = 0.0f;
 }

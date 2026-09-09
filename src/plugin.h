@@ -30,6 +30,7 @@ public:
 	void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick);
 	void Hook_StartupServer(const GameSessionConfiguration_t& config, ISource2WorldSession*, const char*);
 	int  Hook_LoadEventsFromFile(const char* filename, bool bSearchAll);
+	bool Hook_FireEvent(IGameEvent* event, bool bDontBroadcast);
 	void Hook_EntitySystemSpawn(int nCount, const EntitySpawnInfo_t* pInfo);
 	void Hook_ClientPutInServer(CPlayerSlot slot, char const* pszName, int type, uint64 xuid);
 	void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID);

@@ -24,6 +24,7 @@ CGameEntitySystem* GameEntitySystem()
 }
 
 static int g_iEventMgrHookId = 0;
+static int g_iFireEventHookId = 0;
 static int g_iEntSysHookId = 0;
 
 #ifdef _WIN32
@@ -39,6 +40,7 @@ class GameSessionConfiguration_t
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
 SH_DECL_HOOK3_void(INetworkServerService, StartupServer, SH_NOATTRIB, 0, const GameSessionConfiguration_t&, ISource2WorldSession*, const char*);
 SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, 0, int, const char*, bool);
+SH_DECL_HOOK2(IGameEventManager2, FireEvent, SH_NOATTRIB, 0, bool, IGameEvent*, bool);
 SH_DECL_HOOK2_void(CEntitySystem, Spawn, SH_NOATTRIB, 0, int, const EntitySpawnInfo_t*);
 SH_DECL_HOOK4_void(IServerGameClients, ClientPutInServer, SH_NOATTRIB, 0, CPlayerSlot, char const*, int, uint64);
 SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*);
@@ -85,9 +87,12 @@ bool AntiCheatPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
 	if (void* pEventMgrVtbl = FindVirtualTable(SERVER_LIB, "CGameEventManager"))
 	{
+		auto* pMgrAsIface = reinterpret_cast<IGameEventManager2*>(pEventMgrVtbl);
 		g_iEventMgrHookId = SH_ADD_DVPHOOK(IGameEventManager2, LoadEventsFromFile,
-			reinterpret_cast<IGameEventManager2*>(pEventMgrVtbl),
-			SH_MEMBER(this, &AntiCheatPlugin::Hook_LoadEventsFromFile), false);
+			pMgrAsIface, SH_MEMBER(this, &AntiCheatPlugin::Hook_LoadEventsFromFile), false);
+		// Mid-map / late load: LoadEventsFromFile may never run again — capture mgr on FireEvent.
+		g_iFireEventHookId = SH_ADD_DVPHOOK(IGameEventManager2, FireEvent,
+			pMgrAsIface, SH_MEMBER(this, &AntiCheatPlugin::Hook_FireEvent), false);
 	}
 	else
 	{
@@ -129,6 +134,8 @@ bool AntiCheatPlugin::Unload(char* error, size_t maxlen)
 	SH_REMOVE_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientDisconnect), true);
 	if (g_iEventMgrHookId)
 		SH_REMOVE_HOOK_ID(g_iEventMgrHookId);
+	if (g_iFireEventHookId)
+		SH_REMOVE_HOOK_ID(g_iFireEventHookId);
 	if (g_iEntSysHookId)
 		SH_REMOVE_HOOK_ID(g_iEntSysHookId);
 
@@ -150,9 +157,24 @@ void AntiCheatPlugin::Hook_StartupServer(const GameSessionConfiguration_t&, ISou
 
 int AntiCheatPlugin::Hook_LoadEventsFromFile(const char* filename, bool bSearchAll)
 {
+	(void)filename;
+	(void)bSearchAll;
 	if (!g_pGameEventManager)
 		g_pGameEventManager = META_IFACEPTR(IGameEventManager2);
 	RETURN_META_VALUE(MRES_IGNORED, 0);
+}
+
+bool AntiCheatPlugin::Hook_FireEvent(IGameEvent* event, bool bDontBroadcast)
+{
+	(void)event;
+	(void)bDontBroadcast;
+	if (!g_pGameEventManager)
+	{
+		g_pGameEventManager = META_IFACEPTR(IGameEventManager2);
+		if (g_pGameEventManager)
+			AC_Log("game event manager captured via FireEvent");
+	}
+	RETURN_META_VALUE(MRES_IGNORED, true);
 }
 
 void AntiCheatPlugin::Hook_EntitySystemSpawn(int nCount, const EntitySpawnInfo_t* pInfo)

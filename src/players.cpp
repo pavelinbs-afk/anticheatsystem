@@ -16,6 +16,12 @@ CEntityInstance* GetPawnBySlot(int iSlot)
 	if (!pController || !g_pGameEntitySystem)
 		return nullptr;
 
+	// Prefer dedicated player pawn — m_hPawn can be observer when dead/spec.
+	CEntityHandle hPlayerPawn = Schema_Get<CEntityHandle>(pController, "CCSPlayerController", "m_hPlayerPawn");
+	CEntityInstance* pPawn = g_pGameEntitySystem->GetEntityInstance(hPlayerPawn);
+	if (pPawn)
+		return pPawn;
+
 	CEntityHandle hPawn = Schema_Get<CEntityHandle>(pController, "CBasePlayerController", "m_hPawn");
 	return g_pGameEntitySystem->GetEntityInstance(hPawn);
 }
@@ -49,23 +55,56 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 	if (!pPawn || !pController)
 		return false;
 
+	struct Vec3 { float x, y, z; };
+	struct Ang { float pitch, yaw, roll; }; // QAngle: x=pitch, y=yaw, z=roll
+
+	static bool s_loggedSchema = false;
+	if (!s_loggedSchema)
+	{
+		s_loggedSchema = true;
+		AC_Log("schema offs: v_angle=%d eyePawn=%d eyeCtrl=%d absOrigin=%d playerPawn=%d",
+			Schema_GetOffset("CBasePlayerPawn", "v_angle"),
+			Schema_GetOffset("CCSPlayerPawn", "m_angEyeAngles"),
+			Schema_GetOffset("CCSPlayerController", "m_angEyeAngles"),
+			Schema_GetOffset("CGameSceneNode", "m_vecAbsOrigin"),
+			Schema_GetOffset("CCSPlayerController", "m_hPlayerPawn"));
+	}
+
+	Vec3 origin{};
+	void* pNode = Schema_Get<void*>(pPawn, "CBaseEntity", "m_pGameSceneNode");
+	if (pNode)
+		origin = Schema_Get<Vec3>(pNode, "CGameSceneNode", "m_vecAbsOrigin");
+
+	// Eye height — FOV from feet origin breaks pitch checks.
+	// m_vecViewOffset is a networked quantized type; use standing fallback.
+	const float eyeZ = 64.0f;
+
 	if (outPos)
 	{
-		void* pNode = Schema_Get<void*>(pPawn, "CBaseEntity", "m_pGameSceneNode");
-		if (pNode)
-		{
-			struct Vec3 { float x, y, z; };
-			Vec3 abs = Schema_Get<Vec3>(pNode, "CGameSceneNode", "m_vecAbsOrigin");
-			outPos[0] = abs.x;
-			outPos[1] = abs.y;
-			outPos[2] = abs.z;
-		}
+		outPos[0] = origin.x;
+		outPos[1] = origin.y;
+		outPos[2] = origin.z + eyeZ;
 	}
 
 	if (outAngles)
 	{
-		struct Ang { float pitch, yaw, roll; };
-		Ang eye = Schema_Get<Ang>(pController, "CCSPlayerController", "m_angEyeAngles");
+		// v_angle = server view/cmd angles (best for aimbot snap detection).
+		Ang eye = Schema_Get<Ang>(pPawn, "CBasePlayerPawn", "v_angle");
+		const bool vAngleZero = (eye.pitch == 0.0f && eye.yaw == 0.0f);
+
+		if (vAngleZero)
+		{
+			Ang pawnEye = Schema_Get<Ang>(pPawn, "CCSPlayerPawn", "m_angEyeAngles");
+			if (pawnEye.pitch != 0.0f || pawnEye.yaw != 0.0f)
+				eye = pawnEye;
+			else
+			{
+				Ang ctrl = Schema_Get<Ang>(pController, "CCSPlayerController", "m_angEyeAngles");
+				if (ctrl.pitch != 0.0f || ctrl.yaw != 0.0f)
+					eye = ctrl;
+			}
+		}
+
 		outAngles[0] = eye.pitch;
 		outAngles[1] = eye.yaw;
 		outAngles[2] = eye.roll;
@@ -73,7 +112,6 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 
 	if (outVel)
 	{
-		struct Vec3 { float x, y, z; };
 		Vec3 vel = Schema_Get<Vec3>(pPawn, "CBaseEntity", "m_vecAbsVelocity");
 		outVel[0] = vel.x;
 		outVel[1] = vel.y;

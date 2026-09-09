@@ -8,6 +8,7 @@
 
 static bool s_bRegistered = false;
 static int s_iRetryThrottle = 0;
+static int s_iBadSlotLogs = 0;
 
 static const char* s_EventNames[] = {
 	"player_death",
@@ -17,11 +18,43 @@ static const char* s_EventNames[] = {
 	"round_end",
 };
 
+static int SlotFromController(CEntityInstance* ctrl)
+{
+	if (!ctrl)
+		return -1;
+	const int idx = ctrl->GetEntityIndex().Get();
+	// Player controllers live at entity indices 1..AC_MAXPLAYERS
+	if (idx >= 1 && idx <= AC_MAXPLAYERS)
+		return idx - 1;
+	return -1;
+}
+
 static int EventSlot(IGameEvent* event, const char* key)
 {
-	CPlayerSlot slot = event->GetPlayerSlot(key);
-	int i = slot.Get();
-	return (i >= 0 && i < AC_MAXPLAYERS) ? i : -1;
+	if (!event || !key)
+		return -1;
+
+	// Most reliable in CS2: resolve controller entity → slot.
+	int slot = SlotFromController(event->GetPlayerController(key));
+	if (slot >= 0)
+		return slot;
+
+	CPlayerSlot ps = event->GetPlayerSlot(key);
+	int i = ps.Get();
+	if (i >= 0 && i < AC_MAXPLAYERS)
+		return i;
+
+	// Last resort: some builds store slot+1 in the int field (NOT growing userid).
+	int maybe = event->GetInt(key);
+	if (maybe >= 1 && maybe <= AC_MAXPLAYERS)
+		return maybe - 1;
+
+	if (s_iBadSlotLogs < 20)
+	{
+		++s_iBadSlotLogs;
+		AC_Log("event slot fail key=%s GetInt=%d (events may not map players)", key, maybe);
+	}
+	return -1;
 }
 
 class ACEventListener final : public IGameEventListener2
@@ -118,4 +151,5 @@ void Events_OnStartupServer()
 {
 	s_bRegistered = false;
 	s_iRetryThrottle = 0;
+	s_iBadSlotLogs = 0;
 }
