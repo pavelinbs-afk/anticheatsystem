@@ -41,6 +41,7 @@ SH_DECL_HOOK3_void(INetworkServerService, StartupServer, SH_NOATTRIB, 0, const G
 SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, 0, int, const char*, bool);
 SH_DECL_HOOK2_void(CEntitySystem, Spawn, SH_NOATTRIB, 0, int, const EntitySpawnInfo_t*);
 SH_DECL_HOOK4_void(IServerGameClients, ClientPutInServer, SH_NOATTRIB, 0, CPlayerSlot, char const*, int, uint64);
+SH_DECL_HOOK6(IServerGameClients, ClientConnect, SH_NOATTRIB, 0, bool, CPlayerSlot, const char*, uint64, const char*, bool, CBufferString*);
 SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*);
 
 static IServerGameClients* g_pGameClients = nullptr;
@@ -81,6 +82,7 @@ bool AntiCheatPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 	SH_ADD_HOOK(IServerGameDLL, GameFrame, g_pServer, SH_MEMBER(this, &AntiCheatPlugin::Hook_GameFrame), true);
 	SH_ADD_HOOK(INetworkServerService, StartupServer, g_pNetServerService, SH_MEMBER(this, &AntiCheatPlugin::Hook_StartupServer), true);
 	SH_ADD_HOOK(IServerGameClients, ClientPutInServer, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientPutInServer), true);
+	SH_ADD_HOOK(IServerGameClients, ClientConnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientConnect), false);
 	SH_ADD_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientDisconnect), true);
 
 	if (void* pEventMgrVtbl = FindVirtualTable(SERVER_LIB, "CGameEventManager"))
@@ -126,6 +128,7 @@ bool AntiCheatPlugin::Unload(char* error, size_t maxlen)
 	SH_REMOVE_HOOK(IServerGameDLL, GameFrame, g_pServer, SH_MEMBER(this, &AntiCheatPlugin::Hook_GameFrame), true);
 	SH_REMOVE_HOOK(INetworkServerService, StartupServer, g_pNetServerService, SH_MEMBER(this, &AntiCheatPlugin::Hook_StartupServer), true);
 	SH_REMOVE_HOOK(IServerGameClients, ClientPutInServer, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientPutInServer), true);
+	SH_REMOVE_HOOK(IServerGameClients, ClientConnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientConnect), false);
 	SH_REMOVE_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientDisconnect), true);
 	if (g_iEventMgrHookId)
 		SH_REMOVE_HOOK_ID(g_iEventMgrHookId);
@@ -161,8 +164,29 @@ void AntiCheatPlugin::Hook_EntitySystemSpawn(int nCount, const EntitySpawnInfo_t
 		g_pGameEntitySystem = reinterpret_cast<CGameEntitySystem*>(META_IFACEPTR(CEntitySystem));
 }
 
+bool AntiCheatPlugin::Hook_ClientConnect(CPlayerSlot slot, const char* pszName, uint64 xuid, const char* pszNetworkID, bool unk1, CBufferString* pRejectReason)
+{
+	(void)pszName;
+	(void)pszNetworkID;
+	(void)unk1;
+
+	if (!xuid)
+		RETURN_META_VALUE(MRES_IGNORED, true);
+
+	char reject[256]{};
+	if (AntiCheatCore::GetInstance()->ShouldRejectConnect(static_cast<uint64_t>(xuid), reject, sizeof(reject)))
+	{
+		if (pRejectReason)
+			pRejectReason->Insert(0, reject[0] ? reject : "Critical integrity violation");
+		RETURN_META_VALUE(MRES_SUPERCEDE, false);
+	}
+
+	RETURN_META_VALUE(MRES_IGNORED, true);
+}
+
 void AntiCheatPlugin::Hook_ClientPutInServer(CPlayerSlot slot, char const* pszName, int type, uint64 xuid)
 {
+	(void)type;
 	int iSlot = slot.Get();
 	if (iSlot < 0 || iSlot >= AC_MAXPLAYERS)
 		return;

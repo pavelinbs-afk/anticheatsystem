@@ -10,8 +10,9 @@ enum class ScorerAction {
 	NONE,
 	MONITOR,
 	WARN,
-	REPORT,       // was KICK — send moderation report
-	DEFERRED_BAN  // ban via AdminPlugin (10s HTML countdown)
+	REPORT,
+	ADMIN_WARN, // 50+: last HTML warning to online admins
+	BAN         // after ADMIN_WARN, if score keeps rising
 };
 
 struct PlayerSuspicion {
@@ -34,6 +35,8 @@ public:
 private:
 	std::unordered_map<uint64_t, PlayerSuspicion> player_scores_;
 	std::unordered_set<uint64_t> reported_;
+	std::unordered_set<uint64_t> admin_warned_;
+	std::unordered_set<uint64_t> continued_after_warn_;
 	std::unordered_set<uint64_t> banned_;
 
 	float monitor_threshold_ = 15.0f;

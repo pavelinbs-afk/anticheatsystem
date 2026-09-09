@@ -43,7 +43,11 @@ public:
 			int attacker = EventSlot(event, "attacker");
 			int victim = EventSlot(event, "userid");
 			bool hs = event->GetBool("headshot");
-			core->OnPlayerDeath(attacker, victim, hs);
+			bool thrusmoke = event->GetBool("thrusmoke");
+			bool attackerblind = event->GetBool("attackerblind");
+			bool noscope = event->GetBool("noscope");
+			int penetrated = event->GetInt("penetrated");
+			core->OnPlayerDeath(attacker, victim, hs, thrusmoke, attackerblind, noscope, penetrated);
 			return;
 		}
 

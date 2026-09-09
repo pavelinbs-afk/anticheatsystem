@@ -90,7 +90,16 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "score_decay_per_minute", d)) cfg.score_decay_per_second = (float)(d / 60.0);
 	if (JsonFindBool(json, "bhop_detection", b)) cfg.enable_bhop_detection = b;
 	if (JsonFindBool(json, "enable_wallhack_detection", b)) cfg.enable_wallhack_detection = b;
+	if (JsonFindBool(json, "enable_smoke_detection", b)) cfg.enable_smoke_detection = b;
 	if (JsonFindBool(json, "enable_aim_detection", b)) cfg.enable_aim_detection = b;
+	if (JsonFindNumber(json, "wh_track_fov_deg", d)) cfg.wh_track_fov_deg = (float)d;
+	if (JsonFindNumber(json, "wh_min_track_distance", d)) cfg.wh_min_track_distance = (float)d;
+	if (JsonFindNumber(json, "wh_streak_ticks", d)) cfg.wh_streak_ticks = (int)d;
+	if (JsonFindBool(json, "enable_fps_drop_detection", b)) cfg.enable_fps_drop_detection = b;
+	if (JsonFindBool(json, "enable_game_file_scan", b)) cfg.enable_game_file_scan = b;
+	if (JsonFindNumber(json, "fps_max_frame_ms", d)) cfg.fps_max_frame_ms = (float)d;
+	if (JsonFindNumber(json, "fps_spike_stddev_ms", d)) cfg.fps_spike_stddev_ms = (float)d;
+	if (JsonFindNumber(json, "fps_min_spikes", d)) cfg.fps_min_spikes = (int)d;
 
 	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f)", filepath.c_str(), cfg.ban_threshold, cfg.report_threshold);
 	return cfg;

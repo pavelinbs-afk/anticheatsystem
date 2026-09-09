@@ -104,8 +104,17 @@ struct PlayerProfile {
     bool isFlagged = false;
     bool isBanned = false;
     bool actionTakenReport = false;
+    bool actionTakenAdminWarn = false;
     bool actionTakenBan = false;
     int slot = -1;
+
+    // Client frametime / FPS hitch tracking (from INetChannelInfo::GetRemoteFramerate)
+    int fpsDropStreak = 0;
+    float lastClientFrameMs = 0.0f;
+
+    // Wallhack / pre-aim tracking (FOV lock on enemy)
+    int wallAimStreak = 0;
+    uint64_t wallAimTargetSteam = 0;
 
     // === Timestamps ===
     std::chrono::system_clock::time_point lastViolationTime;

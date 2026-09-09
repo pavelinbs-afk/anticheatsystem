@@ -202,6 +202,8 @@ set(AC_PLUGIN_SRCS
   src/modules/statistics_tracker.cpp
   src/modules/integrity_checker.cpp
   src/modules/suspicion_scorer.cpp
+  src/modules/fps_drop_detector.cpp
+  src/modules/game_file_scanner.cpp
 )
 
 set(AC_SDK_SRCS

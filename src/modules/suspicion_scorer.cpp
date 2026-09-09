@@ -19,6 +19,10 @@ void SuspicionScorer::AddScore(uint64_t steamId, const std::string& module, floa
 	player_scores_[steamId].score += score;
 	player_scores_[steamId].last_update = now;
 
+	// After the final admin warning at 50+, any further score gain arms the auto-ban.
+	if (admin_warned_.count(steamId))
+		continued_after_warn_.insert(steamId);
+
 	// Server-only log — never shown to the suspicious player.
 	AC_Log("score +%.1f [%s] steam=%llu reason=%s total=%.1f",
 		score, module.c_str(), (unsigned long long)steamId, reason.c_str(),
@@ -37,13 +41,27 @@ ScorerAction SuspicionScorer::EvaluatePlayer(PlayerProfile& player)
 
 	if (score >= ban_threshold_)
 	{
-		if (!banned_.count(player.steamId))
+		if (!admin_warned_.count(player.steamId))
 		{
-			banned_.insert(player.steamId);
-			AC_Log("[BAN] steam=%llu name=%s score=%.1f",
+			admin_warned_.insert(player.steamId);
+			AC_Log("[ADMIN_WARN] steam=%llu name=%s score=%.1f (last HTML warning to admins)",
 				(unsigned long long)player.steamId, player.name.c_str(), score);
+			return ScorerAction::ADMIN_WARN;
 		}
-		return ScorerAction::DEFERRED_BAN;
+
+		if (continued_after_warn_.count(player.steamId))
+		{
+			if (!banned_.count(player.steamId))
+			{
+				banned_.insert(player.steamId);
+				AC_Log("[BAN] steam=%llu name=%s score=%.1f (continued after admin warn)",
+					(unsigned long long)player.steamId, player.name.c_str(), score);
+			}
+			return ScorerAction::BAN;
+		}
+
+		// Warned, waiting for further detections.
+		return ScorerAction::NONE;
 	}
 
 	if (score >= report_threshold_)

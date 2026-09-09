@@ -16,6 +16,8 @@ class MovementAnalyzer;
 class StatisticsTracker;
 class IntegrityChecker;
 class SuspicionScorer;
+class FpsDropDetector;
+class GameFileScanner;
 
 class AntiCheatCore {
 public:
@@ -24,9 +26,11 @@ public:
 	bool Initialize();
 	void Shutdown();
 
+	// ClientConnect: reject before enter if integrity lockdown / prior integrity ban.
+	bool ShouldRejectConnect(uint64_t steamID, char* rejectReason, size_t rejectLen);
 	void OnPlayerConnect(int slot, uint64_t steamID, const char* name);
 	void OnPlayerDisconnect(int slot, uint64_t steamID);
-	void OnPlayerDeath(int attackerSlot, int victimSlot, bool headshot);
+	void OnPlayerDeath(int attackerSlot, int victimSlot, bool headshot, bool thrusmoke, bool attackerblind, bool noscope, int penetrated);
 	void OnPlayerHurt(int attackerSlot, int victimSlot, float damage);
 	void OnWeaponFire(int shooterSlot);
 	void OnGameFrame();
@@ -52,6 +56,8 @@ private:
 	std::unique_ptr<StatisticsTracker> m_StatisticsTracker;
 	std::unique_ptr<IntegrityChecker> m_IntegrityChecker;
 	std::unique_ptr<SuspicionScorer> m_SuspicionScorer;
+	std::unique_ptr<FpsDropDetector> m_FpsDropDetector;
+	std::unique_ptr<GameFileScanner> m_GameFileScanner;
 
 	void SampleAllPlayers();
 	void ProcessPlayer(PlayerProfile* profile);

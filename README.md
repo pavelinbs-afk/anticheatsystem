@@ -26,9 +26,12 @@ bash build_cmake.sh
 | 15+ | мониторинг (только серверный лог) |
 | 25+ | warn в лог |
 | **35+** | **репорт** в модерацию (`css_anticheat_auto_report`) — **без кика** |
-| **50+** | **бан 45 дней** через AdminPlugin (`css_anticheat_apply_ban`) → HTML по центру 10 сек → кик |
+| **50+** | **последнее HTML-предупреждение админам** (не бан) |
+| далее | если после предупреждения очки **продолжают расти** → **бан 45 дней** + HTML 10 сек + чат |
 
 Очки подозрительности **никогда не показываются** игроку.
+
+Отложенного бана (5–20 мин) нет. При 50+ сначала предупреждение админам; автобан только если детект продолжается.
 
 ## Интеграция
 
@@ -48,6 +51,7 @@ bash build_cmake.sh
     "wallhack_detector": { "enabled": false },
     "movement_analyzer": { "enabled": true, "bhop_detection": false, "speed_threshold": 380.0 },
     "statistics_tracker": { "enabled": true, "kd_threshold": 7.0, "headshot_pct_threshold": 85.0, "min_kills": 12 },
+    "fps_drop_detector": { "enabled": true, "fps_max_frame_ms": 45.0, "fps_spike_stddev_ms": 20.0, "fps_min_spikes": 4, "enable_fps_drop_detection": true },
     "integrity_checker": { "enabled": false }
   },
   "scoring": {
@@ -64,7 +68,7 @@ bash build_cmake.sh
   },
   "notes": {
     "reports": "35+ -> css_anticheat_auto_report (PlaytimeReporter ticket API)",
-    "bans": "50+ -> css_anticheat_apply_ban (AdminPlugin banned_steamids + /api/cs2/sanctions + 10s HTML)"
+    "bans": "50+ -> css_anticheat_apply_ban (AdminPlugin + 10s HTML + chat announce)"
   }
 }
 ```

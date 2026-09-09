@@ -61,3 +61,22 @@ void AdminBridge_SendReport(uint64_t steamId, const char* playerName)
 	AC_Log("bridge report -> %s", cmd);
 	g_pEngine->ServerCommand(cmd);
 }
+
+void AdminBridge_WarnAdmins(uint64_t steamId, const char* playerName, float score)
+{
+	if (!g_pEngine || steamId == 0)
+		return;
+
+	char safeName[96];
+	EscapeForCommand(playerName, safeName, sizeof(safeName));
+	char cmd[320];
+	if (safeName[0])
+		std::snprintf(cmd, sizeof(cmd), "css_anticheat_admin_warn %llu %.1f \"%s\"\n",
+			(unsigned long long)steamId, score, safeName);
+	else
+		std::snprintf(cmd, sizeof(cmd), "css_anticheat_admin_warn %llu %.1f\n",
+			(unsigned long long)steamId, score);
+
+	AC_Log("bridge admin-warn -> %s", cmd);
+	g_pEngine->ServerCommand(cmd);
+}

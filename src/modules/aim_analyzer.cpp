@@ -40,15 +40,15 @@ float AimAnalyzer::OnPlayerShoot(PlayerProfile& shooter, PlayerProfile& victim, 
 
 	float fov = CalculateFOV(shooter.viewAngles, shooter.position, victim.position);
 
-	// Perfect headshot with near-zero FOV after a large recent snap is more suspicious than FOV alone.
+	// Aim kill: perfect headshot with near-zero FOV.
 	if (headshot && fov < m_maxFov && shooter.kills >= 5)
-		suspicionDelta += 3.0f;
+		suspicionDelta += 11.0f;
 
 	if (shooter.timeCrosshairOnEnemy > 0.0f &&
 		shooter.timeCrosshairOnEnemy < (m_minReactionTimeMs / 1000.0f) &&
 		shooter.kills >= 3)
 	{
-		suspicionDelta += 8.0f;
+		suspicionDelta += 12.0f;
 		AC_Log("trigger-like reaction %.0fms steam=%llu",
 			shooter.timeCrosshairOnEnemy * 1000.0f, (unsigned long long)shooter.steamId);
 	}
