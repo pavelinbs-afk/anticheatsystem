@@ -194,6 +194,7 @@ set(AC_PLUGIN_SRCS
   src/players.cpp
   src/events.cpp
   src/config.cpp
+  src/staff_exempt.cpp
   src/anticheat_core.cpp
   src/integration/admin_bridge.cpp
   src/integration/backend_client.cpp

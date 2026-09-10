@@ -20,6 +20,7 @@ class FpsDropDetector;
 class GameFileScanner;
 class ShotTracker;
 class BackendClient;
+class StaffExemptList;
 
 class AntiCheatCore {
 public:
@@ -60,6 +61,9 @@ private:
 	std::unique_ptr<GameFileScanner> m_GameFileScanner;
 	std::unique_ptr<ShotTracker> m_ShotTracker;
 	std::unique_ptr<BackendClient> m_BackendClient;
+	std::unique_ptr<StaffExemptList> m_StaffExempt;
+
+	bool IsStaffExempt(uint64_t steamId) const;
 
 	void SampleAllPlayers();
 	void ProcessPlayer(PlayerProfile* profile);

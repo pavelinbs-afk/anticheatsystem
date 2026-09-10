@@ -16,8 +16,8 @@ public:
 private:
 	float m_hitWindowSec = 0.45f;
 	float m_aimFovDeg = 3.5f;
-	float m_minHitDistance = 150.0f;
-	int m_minShotsBeforeScore = 2;
+	float m_minHitDistance = 200.0f;
+	int m_minShotsBeforeScore = 3;
 
 	// Snap-to-target then hit (rage / hard flick aimbot)
 	float m_snapHitDeg = 28.0f;

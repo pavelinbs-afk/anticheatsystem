@@ -22,7 +22,7 @@ public:
 	const char* GetDescription() override	{ return "CS2 server-side anticheat (MetaMod)"; }
 	const char* GetURL() override			{ return ""; }
 	const char* GetLicense() override		{ return "Proprietary"; }
-	const char* GetVersion() override		{ return "1.1.0"; }
+	const char* GetVersion() override		{ return "1.1.1"; }
 	const char* GetDate() override			{ return __DATE__; }
 	const char* GetLogTag() override		{ return "ANTICHEAT"; }
 

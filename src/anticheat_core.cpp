@@ -12,6 +12,7 @@
 #include "integration/backend_client.h"
 #include "players.h"
 #include "plugin.h"
+#include "staff_exempt.h"
 
 #include <chrono>
 #include <vector>
@@ -42,6 +43,8 @@ bool AntiCheatCore::Initialize()
 	m_GameFileScanner = std::make_unique<GameFileScanner>();
 	m_ShotTracker = std::make_unique<ShotTracker>();
 	m_BackendClient = std::make_unique<BackendClient>();
+	m_StaffExempt = std::make_unique<StaffExemptList>();
+	m_StaffExempt->Reload();
 
 	m_AimAnalyzer->SetConfig(m_Config.snap_angle_threshold, (float)m_Config.snap_time_threshold_ms, 3.0f, 0.5f);
 	m_WallhackDetector->SetConfig(m_Config.wh_track_fov_deg, m_Config.wh_min_track_distance, m_Config.wh_streak_ticks);
@@ -56,9 +59,15 @@ bool AntiCheatCore::Initialize()
 	m_BackendClient->SetConfig(m_Config.backend_api_url, m_Config.backend_api_token, m_Config.enable_backend_check);
 
 	std::memset(m_SlotToSteam, 0, sizeof(m_SlotToSteam));
-	AC_Log("core initialized (shot_track=%d backend=%d)",
-		(int)m_Config.enable_shot_tracking, (int)m_BackendClient->IsEnabled());
+	AC_Log("core initialized (shot_track=%d backend=%d staff_exempt=%d)",
+		(int)m_Config.enable_shot_tracking, (int)m_BackendClient->IsEnabled(),
+		(int)(m_StaffExempt ? m_StaffExempt->Size() : 0));
 	return true;
+}
+
+bool AntiCheatCore::IsStaffExempt(uint64_t steamId) const
+{
+	return m_StaffExempt && m_StaffExempt->IsExempt(steamId);
 }
 
 void AntiCheatCore::Shutdown()
@@ -241,6 +250,13 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 	if (m_GameFileScanner && m_Config.enable_game_file_scan)
 		m_GameFileScanner->ScanOnPlayerJoin(steamID, profile->name.c_str());
 
+	if (IsStaffExempt(steamID))
+	{
+		AC_Log("connect steam=%llu staff exempt (ст. модератор+) — AC ignore",
+			(unsigned long long)steamID);
+		return;
+	}
+
 	QueueBackendCheck(profile.get());
 }
 
@@ -271,6 +287,8 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 {
 	PlayerProfile* attacker = GetPlayerBySlot(attackerSlot);
 	PlayerProfile* victim = GetPlayerBySlot(victimSlot);
+	if (attacker && IsStaffExempt(attacker->steamId))
+		attacker = nullptr;
 	if (attacker && victim && attacker->steamId != victim->steamId)
 	{
 		attacker->kills++;
@@ -327,6 +345,8 @@ void AntiCheatCore::OnPlayerHurt(int attackerSlot, int victimSlot, float damage,
 	PlayerProfile* victim = GetPlayerBySlot(victimSlot);
 	if (!attacker || !victim || attacker->steamId == victim->steamId)
 		return;
+	if (IsStaffExempt(attacker->steamId))
+		return;
 
 	attacker->totalDamage += damage;
 	attacker->shotsHit++;
@@ -368,6 +388,8 @@ void AntiCheatCore::OnWeaponFire(int shooterSlot)
 		}
 		return;
 	}
+	if (IsStaffExempt(shooter->steamId))
+		return;
 
 	float pos[3]{}, ang[3]{}, vel[3]{};
 	if (SamplePlayerState(shooter->slot, pos, ang, vel))
@@ -427,6 +449,10 @@ void AntiCheatCore::OnGameFrame()
 	ProcessBackendResults();
 	m_SuspicionScorer->DecayScores(deltaTime);
 
+	CGlobalVars* gvTick = GetGlobals();
+	if (m_StaffExempt)
+		m_StaffExempt->Tick(gvTick ? gvTick->curtime : 0.0f);
+
 	if (m_GameFileScanner && m_Config.enable_game_file_scan)
 	{
 		CGlobalVars* gv = GetGlobals();
@@ -475,6 +501,8 @@ void AntiCheatCore::OnRoundEnd()
 void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 {
 	if (!profile || profile->isBanned || profile->actionTakenBan)
+		return;
+	if (IsStaffExempt(profile->steamId))
 		return;
 
 	const bool alive = IsPlayerAlive(profile->slot);
@@ -533,6 +561,8 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 {
 	if (!profile || profile->actionTakenBan)
+		return;
+	if (IsStaffExempt(profile->steamId))
 		return;
 
 	// Local MarkBanned = already issued ApplyBan this uptime → never call it again.

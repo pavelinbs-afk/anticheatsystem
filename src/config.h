@@ -4,7 +4,7 @@
 #include <cstdint>
 
 struct AntiCheatConfig {
-	float snap_angle_threshold = 40.0f;
+	float snap_angle_threshold = 55.0f;
 	int snap_time_threshold_ms = 50;
 	float headshot_ratio_threshold = 0.85f;
 	int min_kills_for_stats = 12;
@@ -27,7 +27,7 @@ struct AntiCheatConfig {
 	bool enable_skill_spike_detection = true;
 	bool enable_stats_tracking = true;
 	bool enable_movement_detection = true;
-	bool enable_fps_drop_detection = true;
+	bool enable_fps_drop_detection = false;
 	bool enable_game_file_scan = true;
 
 	// WH / smoke
@@ -46,8 +46,8 @@ struct AntiCheatConfig {
 	bool enable_shot_tracking = true;
 	float shot_hit_window_sec = 0.45f;
 	float shot_aim_fov_deg = 3.5f;
-	float shot_min_hit_distance = 150.0f;
-	int shot_min_shots_before_score = 2;
+	float shot_min_hit_distance = 200.0f;
+	int shot_min_shots_before_score = 3;
 
 	// Backend bypass/IP check → GET /api/cs2/anticheat/check (same logic as site /bypass)
 	bool enable_backend_check = true;

@@ -4,8 +4,11 @@
 #include <sstream>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include "plugin.h"
+
+#include <tier1/utlstring.h>
 
 static bool ReadFileText(const std::string& path, std::string& out)
 {
@@ -16,6 +19,41 @@ static bool ReadFileText(const std::string& path, std::string& out)
 	ss << f.rdbuf();
 	out = ss.str();
 	return true;
+}
+
+static void NormalizeSlashes(std::string& path)
+{
+	for (char& c : path)
+	{
+		if (c == '\\')
+			c = '/';
+	}
+}
+
+static bool ResolveGameDir(std::string& out)
+{
+	out.clear();
+	if (g_pEngine)
+	{
+		CBufferStringN<512> gameDir;
+		g_pEngine->GetGameDir(gameDir);
+		const char* gd = gameDir.Get();
+		if (gd && *gd)
+		{
+			out = gd;
+			NormalizeSlashes(out);
+			return true;
+		}
+	}
+
+	const char* plat = Plat_GetGameDirectory();
+	if (plat && *plat)
+	{
+		out = plat;
+		NormalizeSlashes(out);
+		return true;
+	}
+	return false;
 }
 
 static bool JsonFindNumber(const std::string& json, const char* key, double& out)
@@ -94,11 +132,37 @@ static bool JsonFindBool(const std::string& json, const char* key, bool& out)
 
 AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 {
+	(void)filepath;
+
 	AntiCheatConfig cfg;
 	std::string json;
-	if (!ReadFileText(filepath, json))
+	std::string usedPath;
+
+	std::vector<std::string> candidates;
+	std::string gameDir;
+	if (ResolveGameDir(gameDir))
 	{
-		AC_Log("config not found (%s), using defaults", filepath.c_str());
+		candidates.push_back(gameDir + "/addons/anticheat/configs/anticheat_config.json");
+		candidates.push_back(gameDir + "/csgo/addons/anticheat/configs/anticheat_config.json");
+	}
+	candidates.push_back("addons/anticheat/configs/anticheat_config.json");
+	candidates.push_back("csgo/addons/anticheat/configs/anticheat_config.json");
+	if (!filepath.empty())
+		candidates.insert(candidates.begin(), filepath);
+
+	for (const std::string& path : candidates)
+	{
+		if (ReadFileText(path, json))
+		{
+			usedPath = path;
+			break;
+		}
+	}
+
+	if (usedPath.empty())
+	{
+		AC_Log("config not found (tried gameDir=%s), using defaults",
+			gameDir.empty() ? "?" : gameDir.c_str());
 		return cfg;
 	}
 
@@ -139,8 +203,11 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 		std::string s;
 		if (JsonFindString(json, "backend_api_url", s)) cfg.backend_api_url = s;
 		if (JsonFindString(json, "backend_api_token", s)) cfg.backend_api_token = s;
+		if (JsonFindString(json, "reason", s)) cfg.ban_reason = s;
 	}
 
-	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f)", filepath.c_str(), cfg.ban_threshold, cfg.report_threshold);
+	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f snap>=%.0f backend=%d)",
+		usedPath.c_str(), cfg.ban_threshold, cfg.report_threshold,
+		cfg.snap_angle_threshold, (int)cfg.enable_backend_check);
 	return cfg;
 }
