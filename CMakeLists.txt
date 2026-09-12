@@ -207,6 +207,8 @@ set(AC_PLUGIN_SRCS
   src/modules/fps_drop_detector.cpp
   src/modules/game_file_scanner.cpp
   src/modules/shot_tracker.cpp
+  src/modules/network_safety.cpp
+  src/modules/combat_heuristics.cpp
 )
 
 set(AC_SDK_SRCS

@@ -40,7 +40,7 @@ float ShotTracker::OnWeaponFire(PlayerProfile& shooter, float curtime, const std
 		if (!e)
 			continue;
 		float dist = VectorDistance(shooter.position, e->position);
-		float fov = CalculateFOV(shooter.viewAngles, shooter.position, e->position);
+		float fov = CalculateFOVToBody(shooter.viewAngles, shooter.position, e->position);
 		if (fov < bestFov)
 		{
 			bestFov = fov;
@@ -128,7 +128,7 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 
 	matched->consumedHit = true;
 
-	const float fovAtFire = CalculateFOV(matched->angles, matched->eyePos, victim.position);
+	const float fovAtFire = CalculateFOVToBody(matched->angles, matched->eyePos, victim.position);
 	const float distAtFire = VectorDistance(matched->eyePos, victim.position);
 	const float dist = distAtFire > 1.0f ? distAtFire : distNow;
 	const float snap = std::max(matched->snapDeg, matched->snapFromPrevShot);
@@ -172,12 +172,26 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 
 	// Soft aimbot: on-target + meaningful snap (not perfect static aim).
 	// Perfect FOV without snap is legit — do NOT score it.
-	if (fovAtFire <= m_aimFovDeg && snap >= m_snapHitDeg)
+	// CS2AC snap-return: large snap that lands on target then settles.
+	bool snapReturn = false;
+	if (attacker.angleDeltaHistory.size() >= 4)
+	{
+		const float a0 = attacker.angleDeltaHistory[attacker.angleDeltaHistory.size() - 1];
+		const float a1 = attacker.angleDeltaHistory[attacker.angleDeltaHistory.size() - 2];
+		const float a2 = attacker.angleDeltaHistory[attacker.angleDeltaHistory.size() - 3];
+		const float surround = (a1 + a2) * 0.5f;
+		if (surround < 10.0f && a0 > 0.5f && a0 > surround * 5.0f && fovAtFire <= m_aimFovDeg)
+			snapReturn = true;
+	}
+
+	if ((fovAtFire <= m_aimFovDeg && snap >= m_snapHitDeg) || snapReturn)
 	{
 		suspicion += head ? 7.0f : 4.0f;
+		if (snapReturn)
+			suspicion += 3.0f;
 		attacker.aimbotHitStreak++;
-		AC_Log("aimbot-like snap-hit fov=%.2f snap=%.1f hs=%d dist=%.0f streak=%d steam=%llu +%.0f",
-			fovAtFire, snap, (int)head, dist, attacker.aimbotHitStreak,
+		AC_Log("aimbot-like snap-hit fov=%.2f snap=%.1f ret=%d hs=%d dist=%.0f streak=%d steam=%llu +%.0f",
+			fovAtFire, snap, (int)snapReturn, (int)head, dist, attacker.aimbotHitStreak,
 			(unsigned long long)attacker.steamId, suspicion);
 	}
 	else if (snap >= (m_snapHitDeg + 20.0f) && fovAtFire <= (m_aimFovDeg + 3.0f) && head)

@@ -50,3 +50,20 @@ inline float CalculateFOV(const AcAngle& viewAngle, const AcVec3& eyePos, const 
 
     return std::sqrt(dPitch * dPitch + dYaw * dYaw);
 }
+
+// CS2AC body aim points: feet+8 / +46 / +64 (our position is eye ≈ feet+64).
+inline float CalculateFOVToBody(const AcAngle& viewAngle, const AcVec3& eyePos, const AcVec3& enemyEyeOrOrigin) {
+    // Treat stored position as eye; reconstruct approximate feet.
+    AcVec3 feet = enemyEyeOrOrigin;
+    feet.z -= 64.0f;
+    static const float kHeights[] = {8.0f, 46.0f, 64.0f};
+    float best = 180.0f;
+    for (float h : kHeights) {
+        AcVec3 p = feet;
+        p.z += h;
+        float fov = CalculateFOV(viewAngle, eyePos, p);
+        if (fov < best)
+            best = fov;
+    }
+    return best;
+}

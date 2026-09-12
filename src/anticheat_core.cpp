@@ -8,6 +8,9 @@
 #include "modules/fps_drop_detector.h"
 #include "modules/game_file_scanner.h"
 #include "modules/shot_tracker.h"
+#include "modules/network_safety.h"
+#include "modules/combat_heuristics.h"
+#include "modules/math_utils.h"
 #include "integration/admin_bridge.h"
 #include "integration/backend_client.h"
 #include "players.h"
@@ -44,6 +47,8 @@ bool AntiCheatCore::Initialize()
 	m_ShotTracker = std::make_unique<ShotTracker>();
 	m_BackendClient = std::make_unique<BackendClient>();
 	m_StaffExempt = std::make_unique<StaffExemptList>();
+	m_NetworkSafety = std::make_unique<NetworkSafety>();
+	m_CombatHeuristics = std::make_unique<CombatHeuristics>();
 	m_StaffExempt->Reload();
 
 	m_AimAnalyzer->SetConfig(m_Config.snap_angle_threshold, (float)m_Config.snap_time_threshold_ms, 3.0f, 0.5f);
@@ -68,6 +73,21 @@ bool AntiCheatCore::Initialize()
 bool AntiCheatCore::IsStaffExempt(uint64_t steamId) const
 {
 	return m_StaffExempt && m_StaffExempt->IsExempt(steamId);
+}
+
+void AntiCheatCore::AddSoftScore(uint64_t steamId, const char* module, float score, const char* reason, const PlayerProfile* netProfile)
+{
+	if (score <= 0.0f || !m_SuspicionScorer)
+		return;
+	if (m_Config.enable_network_safety && m_NetworkSafety && netProfile &&
+		m_NetworkSafety->ShouldVetoSoftDetections(*netProfile))
+	{
+		AC_Log("network veto +%.1f [%s] steam=%llu ping=%.0f jitter=%.0f (soft detect skipped)",
+			score, module, (unsigned long long)steamId,
+			netProfile->lastPingMs, netProfile->lastJitterMs);
+		return;
+	}
+	m_SuspicionScorer->AddScore(steamId, module, score, reason);
 }
 
 void AntiCheatCore::Shutdown()
@@ -372,7 +392,14 @@ void AntiCheatCore::OnPlayerHurt(int attackerSlot, int victimSlot, float damage,
 	const float curtime = gv ? gv->curtime : 0.0f;
 	float score = m_ShotTracker->OnPlayerHurt(*attacker, *victim, damage, hitgroup, curtime);
 	if (score > 0.0f)
-		m_SuspicionScorer->AddScore(attacker->steamId, "ShotTracker", score, "Shot aim anomaly");
+		AddSoftScore(attacker->steamId, "ShotTracker", score, "Shot aim anomaly", attacker);
+
+	if (m_Config.enable_combat_heuristics && m_CombatHeuristics)
+	{
+		float hScore = m_CombatHeuristics->OnPlayerHurt(*attacker, *victim, curtime);
+		if (hScore > 0.0f)
+			AddSoftScore(attacker->steamId, "CombatHeuristics", hScore, "Trigger/accuracy", attacker);
+	}
 }
 
 void AntiCheatCore::OnWeaponFire(int shooterSlot)
@@ -412,7 +439,14 @@ void AntiCheatCore::OnWeaponFire(int shooterSlot)
 	auto enemies = CollectEnemies(shooter);
 	float score = m_ShotTracker->OnWeaponFire(*shooter, curtime, enemies);
 	if (score > 0.0f)
-		m_SuspicionScorer->AddScore(shooter->steamId, "ShotTracker", score, "Rage aim snap");
+		AddSoftScore(shooter->steamId, "ShotTracker", score, "Rage aim snap", shooter);
+
+	if (m_Config.enable_combat_heuristics && m_CombatHeuristics)
+	{
+		float hScore = m_CombatHeuristics->OnWeaponFire(*shooter, curtime, enemies);
+		if (hScore > 0.0f)
+			AddSoftScore(shooter->steamId, "CombatHeuristics", hScore, "Trigger/aimlock/doubletap", shooter);
+	}
 }
 
 void AntiCheatCore::SampleAllPlayers()
@@ -429,7 +463,22 @@ void AntiCheatCore::SampleAllPlayers()
 		profile->lastViewAngles = profile->viewAngles;
 		profile->viewAngles = AcAngle(ang[0], ang[1], ang[2]);
 		profile->velocity = AcVec3(vel[0], vel[1], vel[2]);
-		profile->inAir = false;
+
+		const float dPitch = AngleDifference(profile->viewAngles.pitch, profile->lastViewAngles.pitch);
+		const float dYaw = AngleDifference(profile->viewAngles.yaw, profile->lastViewAngles.yaw);
+		const float snap = std::sqrt(dPitch * dPitch + dYaw * dYaw);
+		profile->angleHistory.push_back(profile->viewAngles);
+		while (profile->angleHistory.size() > 128)
+			profile->angleHistory.pop_front();
+		profile->angleDeltaHistory.push_back(snap);
+		while (profile->angleDeltaHistory.size() > 128)
+			profile->angleDeltaHistory.pop_front();
+		profile->positionHistory.push_back(profile->position);
+		while (profile->positionHistory.size() > 128)
+			profile->positionHistory.pop_front();
+
+		// Air heuristic: vertical velocity
+		profile->inAir = std::fabs(profile->velocity.z) > 20.0f;
 
 		if (profile->ipAddress.empty())
 			profile->ipAddress = GetClientIpForSlot(profile->slot);
@@ -512,15 +561,26 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 
 	float scoreDelta = 0.0f;
 
+	if (g_pEngine && m_Config.enable_network_safety && m_NetworkSafety)
+	{
+		INetChannelInfo* net = g_pEngine->GetPlayerNetInfo(CPlayerSlot(profile->slot));
+		if (net && !net->IsTimingOut())
+			m_NetworkSafety->Sample(*profile, net);
+	}
+
+	auto enemies = (alive && team >= 2) ? CollectEnemies(profile) : std::vector<PlayerProfile*>{};
+	if (m_Config.enable_combat_heuristics && m_CombatHeuristics && alive && team >= 2)
+		m_CombatHeuristics->OnTick(*profile, enemies, curtime);
+
 	if (m_Config.enable_aim_detection && alive && team >= 2)
 	{
 		scoreDelta = m_AimAnalyzer->Analyze(*profile, 0.015f);
 		if (scoreDelta > 0.0f)
-			m_SuspicionScorer->AddScore(profile->steamId, "AimAnalyzer", scoreDelta, "Aim anomaly");
+			AddSoftScore(profile->steamId, "AimAnalyzer", scoreDelta, "Aim anomaly", profile);
 	}
 
 	if (m_Config.enable_wallhack_detection && alive && team >= 2)
-		m_WallhackDetector->Analyze(*profile, CollectEnemies(profile));
+		m_WallhackDetector->Analyze(*profile, enemies);
 
 	if (m_Config.enable_movement_detection)
 	{
@@ -540,7 +600,7 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 			net->GetRemoteFramerate(&frameTime, &frameStd, &frameStartStd);
 			scoreDelta = m_FpsDropDetector->Analyze(*profile, frameTime, frameStd);
 			if (scoreDelta > 0.0f)
-				m_SuspicionScorer->AddScore(profile->steamId, "FpsDropDetector", scoreDelta, "Client FPS hitch");
+				AddSoftScore(profile->steamId, "FpsDropDetector", scoreDelta, "Client FPS hitch", profile);
 		}
 	}
 

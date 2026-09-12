@@ -142,6 +142,31 @@ struct PlayerProfile {
     int aimbotHitStreak = 0;
     int silentAimHits = 0;
 
+    // === CS2AC-inspired combat / network state ===
+    float crosshairOnEnemySince = 0.0f;
+    uint64_t crosshairEnemySteam = 0;
+    bool crosshairFreshContact = false;
+    float lastFireTime = 0.0f;
+    float prevFireTime = 0.0f;
+    int doubleTapPairs = 0;
+    int triggerScore = 0;
+    uint64_t aimlockTargetSteam = 0;
+    int aimlockSamples = 0;
+    int aimlockOnTicks = 0;
+    float aimlockTravelAccum = 0.0f;
+    float aimlockStartDist = 0.0f;
+    AcVec3 aimlockLastTargetPos;
+    int aimlockEpisodes = 0;
+    int aimedShots = 0;
+    int aimedHits = 0;
+    bool inhumanAccuracyFlagged = false;
+    bool networkUnsafe = false;
+    float lastPingMs = 0.0f;
+    float lastJitterMs = 0.0f;
+    float lastLoss = 0.0f;
+    float lastChoke = 0.0f;
+    int networkUnavailableStreak = 0;
+
     // === Timestamps ===
     std::chrono::system_clock::time_point lastViolationTime;
 

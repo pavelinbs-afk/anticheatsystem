@@ -44,6 +44,8 @@ struct AntiCheatConfig {
 
 	// Shot tracking (all weapon_fire, not only kills)
 	bool enable_shot_tracking = true;
+	bool enable_combat_heuristics = true; // trigger / aimlock / doubletap / inhuman acc (CS2AC-inspired)
+	bool enable_network_safety = true;    // veto soft detections on bad net
 	float shot_hit_window_sec = 0.45f;
 	float shot_aim_fov_deg = 3.5f;
 	float shot_min_hit_distance = 200.0f;

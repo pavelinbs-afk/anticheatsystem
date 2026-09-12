@@ -194,6 +194,8 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "fps_spike_stddev_ms", d)) cfg.fps_spike_stddev_ms = (float)d;
 	if (JsonFindNumber(json, "fps_min_spikes", d)) cfg.fps_min_spikes = (int)d;
 	if (JsonFindBool(json, "enable_shot_tracking", b)) cfg.enable_shot_tracking = b;
+	if (JsonFindBool(json, "enable_combat_heuristics", b)) cfg.enable_combat_heuristics = b;
+	if (JsonFindBool(json, "enable_network_safety", b)) cfg.enable_network_safety = b;
 	if (JsonFindNumber(json, "shot_hit_window_sec", d)) cfg.shot_hit_window_sec = (float)d;
 	if (JsonFindNumber(json, "shot_aim_fov_deg", d)) cfg.shot_aim_fov_deg = (float)d;
 	if (JsonFindNumber(json, "shot_min_hit_distance", d)) cfg.shot_min_hit_distance = (float)d;

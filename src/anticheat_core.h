@@ -21,6 +21,8 @@ class GameFileScanner;
 class ShotTracker;
 class BackendClient;
 class StaffExemptList;
+class NetworkSafety;
+class CombatHeuristics;
 
 class AntiCheatCore {
 public:
@@ -62,8 +64,11 @@ private:
 	std::unique_ptr<ShotTracker> m_ShotTracker;
 	std::unique_ptr<BackendClient> m_BackendClient;
 	std::unique_ptr<StaffExemptList> m_StaffExempt;
+	std::unique_ptr<NetworkSafety> m_NetworkSafety;
+	std::unique_ptr<CombatHeuristics> m_CombatHeuristics;
 
 	bool IsStaffExempt(uint64_t steamId) const;
+	void AddSoftScore(uint64_t steamId, const char* module, float score, const char* reason, const PlayerProfile* netProfile);
 
 	void SampleAllPlayers();
 	void ProcessPlayer(PlayerProfile* profile);
