@@ -31,7 +31,8 @@ void AdminBridge_ApplyBan(uint64_t steamId, const char* playerName)
 
 	char safeName[96];
 	EscapeForCommand(playerName, safeName, sizeof(safeName));
-	char cmd[256];
+
+	char cmd[320];
 	if (safeName[0])
 		std::snprintf(cmd, sizeof(cmd), "css_anticheat_apply_ban %llu \"%s\"\n",
 			(unsigned long long)steamId, safeName);
