@@ -11,8 +11,8 @@ enum class ScorerAction {
 	MONITOR,
 	WARN,
 	REPORT,
-	ADMIN_WARN, // 50+: last HTML warning to online admins
-	BAN         // after ADMIN_WARN, if score keeps rising
+	ADMIN_WARN, // last HTML warning to online admins (before ban threshold)
+	BAN         // only at ban_threshold, after ADMIN_WARN + continued detections
 };
 
 struct PlayerSuspicion {
@@ -25,10 +25,11 @@ public:
 	SuspicionScorer() = default;
 	~SuspicionScorer() = default;
 
-	void SetThresholds(float monitor, float warn, float report, float ban, float decayPerSec);
+	void SetThresholds(float monitor, float warn, float report, float adminWarn, float ban, float decayPerSec);
 
 	void AddScore(uint64_t steamId, const std::string& module, float score, const std::string& reason);
 	float GetScore(uint64_t steamId);
+	float GetDecayPerSecond() const { return decay_rate_per_second_; }
 	ScorerAction EvaluatePlayer(PlayerProfile& player);
 	void DecayScores(float deltaTime);
 
@@ -46,6 +47,7 @@ private:
 	float monitor_threshold_ = 15.0f;
 	float warn_threshold_ = 25.0f;
 	float report_threshold_ = 35.0f;
-	float ban_threshold_ = 50.0f;
+	float admin_warn_threshold_ = 50.0f;
+	float ban_threshold_ = 55.0f;
 	float decay_rate_per_second_ = 0.02f;
 };

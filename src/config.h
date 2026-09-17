@@ -15,11 +15,13 @@ struct AntiCheatConfig {
 	float monitor_threshold = 15.0f;
 	float warn_threshold = 25.0f;
 	float report_threshold = 35.0f;
-	float ban_threshold = 50.0f;
+	float admin_warn_threshold = 50.0f; // HTML warn to admins; ban waits for ban_threshold
+	float ban_threshold = 55.0f;
 
 	int ban_duration_days = 45;
 	std::string ban_reason = "Использование читов (Античит система)";
 	int ban_countdown_seconds = 10;
+	std::string discord_webhook_url = ""; // Discord embed on auto-ban (empty = off)
 
 	bool enable_aim_detection = true;
 	bool enable_wallhack_detection = true;

@@ -1,11 +1,12 @@
 #include "suspicion_scorer.h"
 #include "../plugin.h"
 
-void SuspicionScorer::SetThresholds(float monitor, float warn, float report, float ban, float decayPerSec)
+void SuspicionScorer::SetThresholds(float monitor, float warn, float report, float adminWarn, float ban, float decayPerSec)
 {
 	monitor_threshold_ = monitor;
 	warn_threshold_ = warn;
 	report_threshold_ = report;
+	admin_warn_threshold_ = adminWarn;
 	ban_threshold_ = ban;
 	decay_rate_per_second_ = decayPerSec;
 }
@@ -43,12 +44,13 @@ ScorerAction SuspicionScorer::EvaluatePlayer(PlayerProfile& player)
 
 	float score = GetScore(player.steamId);
 
+	// Hard ban line: only at ban_threshold (default 55), after admin warn + more detections.
 	if (score >= ban_threshold_)
 	{
 		if (!admin_warned_.count(player.steamId))
 		{
 			admin_warned_.insert(player.steamId);
-			AC_Log("[ADMIN_WARN] steam=%llu name=%s score=%.1f (last HTML warning to admins)",
+			AC_Log("[ADMIN_WARN] steam=%llu name=%s score=%.1f (jumped to ban line; HTML warn first)",
 				(unsigned long long)player.steamId, player.name.c_str(), score);
 			return ScorerAction::ADMIN_WARN;
 		}
@@ -58,13 +60,31 @@ ScorerAction SuspicionScorer::EvaluatePlayer(PlayerProfile& player)
 			if (!banned_.count(player.steamId))
 			{
 				banned_.insert(player.steamId);
-				AC_Log("[BAN] steam=%llu name=%s score=%.1f (continued after admin warn)",
+				AC_Log("[BAN] steam=%llu name=%s score=%.1f (reached ban threshold after admin warn)",
 					(unsigned long long)player.steamId, player.name.c_str(), score);
 			}
 			return ScorerAction::BAN;
 		}
 
-		// Warned, waiting for further detections.
+		return ScorerAction::NONE;
+	}
+
+	// Soft admin warn (default 50): notify staff, but do NOT ban until ban_threshold.
+	if (score >= admin_warn_threshold_)
+	{
+		if (!admin_warned_.count(player.steamId))
+		{
+			admin_warned_.insert(player.steamId);
+			AC_Log("[ADMIN_WARN] steam=%llu name=%s score=%.1f (ban deferred until %.0f)",
+				(unsigned long long)player.steamId, player.name.c_str(), score, ban_threshold_);
+			return ScorerAction::ADMIN_WARN;
+		}
+		// Already warned, still below ban line — keep waiting (report path already done).
+		if (!reported_.count(player.steamId))
+		{
+			reported_.insert(player.steamId);
+			return ScorerAction::REPORT;
+		}
 		return ScorerAction::NONE;
 	}
 

@@ -178,6 +178,7 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "warn_threshold", d)) cfg.warn_threshold = (float)d;
 	if (JsonFindNumber(json, "report_threshold", d)) cfg.report_threshold = (float)d;
 	if (JsonFindNumber(json, "kick_threshold", d)) cfg.report_threshold = (float)d; // legacy name
+	if (JsonFindNumber(json, "admin_warn_threshold", d)) cfg.admin_warn_threshold = (float)d;
 	if (JsonFindNumber(json, "ban_threshold", d)) cfg.ban_threshold = (float)d;
 	if (JsonFindNumber(json, "duration_days", d)) cfg.ban_duration_days = (int)d;
 	if (JsonFindNumber(json, "score_decay_per_minute", d)) cfg.score_decay_per_second = (float)(d / 60.0);
@@ -206,6 +207,7 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 		if (JsonFindString(json, "backend_api_url", s)) cfg.backend_api_url = s;
 		if (JsonFindString(json, "backend_api_token", s)) cfg.backend_api_token = s;
 		if (JsonFindString(json, "reason", s)) cfg.ban_reason = s;
+		if (JsonFindString(json, "discord_webhook_url", s)) cfg.discord_webhook_url = s;
 	}
 
 	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f snap>=%.0f backend=%d)",

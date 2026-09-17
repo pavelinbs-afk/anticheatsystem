@@ -13,6 +13,7 @@
 #include "modules/math_utils.h"
 #include "integration/admin_bridge.h"
 #include "integration/backend_client.h"
+#include "integration/discord_webhook.h"
 #include "players.h"
 #include "plugin.h"
 #include "staff_exempt.h"
@@ -46,6 +47,7 @@ bool AntiCheatCore::Initialize()
 	m_GameFileScanner = std::make_unique<GameFileScanner>();
 	m_ShotTracker = std::make_unique<ShotTracker>();
 	m_BackendClient = std::make_unique<BackendClient>();
+	m_DiscordWebhook = std::make_unique<DiscordWebhook>();
 	m_StaffExempt = std::make_unique<StaffExemptList>();
 	m_NetworkSafety = std::make_unique<NetworkSafety>();
 	m_CombatHeuristics = std::make_unique<CombatHeuristics>();
@@ -56,16 +58,19 @@ bool AntiCheatCore::Initialize()
 	m_MovementAnalyzer->SetConfig(m_Config.speed_threshold, 800.0f);
 	m_FpsDropDetector->SetConfig(m_Config.fps_max_frame_ms, m_Config.fps_spike_stddev_ms, m_Config.fps_min_spikes);
 	m_SuspicionScorer->SetThresholds(m_Config.monitor_threshold, m_Config.warn_threshold,
-		m_Config.report_threshold, m_Config.ban_threshold, m_Config.score_decay_per_second);
+		m_Config.report_threshold, m_Config.admin_warn_threshold, m_Config.ban_threshold,
+		m_Config.score_decay_per_second);
 	m_ShotTracker->SetConfig(m_Config.shot_hit_window_sec, m_Config.shot_aim_fov_deg,
 		m_Config.shot_min_hit_distance, m_Config.shot_min_shots_before_score);
 	m_GameFileScanner->SetEnabled(m_Config.enable_game_file_scan);
 	m_GameFileScanner->ScanAtStartup();
 	m_BackendClient->SetConfig(m_Config.backend_api_url, m_Config.backend_api_token, m_Config.enable_backend_check);
+	m_DiscordWebhook->SetWebhookUrl(m_Config.discord_webhook_url);
 
 	std::memset(m_SlotToSteam, 0, sizeof(m_SlotToSteam));
-	AC_Log("core initialized (shot_track=%d backend=%d staff_exempt=%d)",
+	AC_Log("core initialized (shot_track=%d backend=%d discord=%d staff_exempt=%d)",
 		(int)m_Config.enable_shot_tracking, (int)m_BackendClient->IsEnabled(),
+		(int)m_DiscordWebhook->IsEnabled(),
 		(int)(m_StaffExempt ? m_StaffExempt->Size() : 0));
 	return true;
 }
@@ -663,6 +668,25 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 		profile->isBanned = true;
 		m_SuspicionScorer->MarkBanned(profile->steamId);
 		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str());
+
+		if (m_DiscordWebhook && m_DiscordWebhook->IsEnabled())
+		{
+			DiscordBanNotify n;
+			n.steamId = profile->steamId;
+			n.playerName = profile->name;
+			n.reason = m_Config.ban_reason;
+			n.durationDays = m_Config.ban_duration_days;
+			n.suspicionScore = m_SuspicionScorer->GetScore(profile->steamId);
+			n.decayPerSecond = m_SuspicionScorer->GetDecayPerSecond();
+			if (CGlobalVars* gv = GetGlobals())
+			{
+				const char* map = STRING(gv->mapname);
+				if (map && map[0])
+					n.mapName = map;
+			}
+			m_DiscordWebhook->NotifyBan(n);
+		}
+
 		AC_Log("auto-ban steam=%llu name=%s score=%.1f (continued after admin warn)",
 			(unsigned long long)profile->steamId, profile->name.c_str(),
 			m_SuspicionScorer->GetScore(profile->steamId));

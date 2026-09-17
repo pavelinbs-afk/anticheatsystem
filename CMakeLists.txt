@@ -198,6 +198,7 @@ set(AC_PLUGIN_SRCS
   src/anticheat_core.cpp
   src/integration/admin_bridge.cpp
   src/integration/backend_client.cpp
+  src/integration/discord_webhook.cpp
   src/modules/aim_analyzer.cpp
   src/modules/wallhack_detector.cpp
   src/modules/movement_analyzer.cpp

@@ -26,12 +26,12 @@ bash build_cmake.sh
 | 15+ | мониторинг (только серверный лог) |
 | 25+ | warn в лог |
 | **35+** | **репорт** в модерацию (`css_anticheat_auto_report`) — **без кика** |
-| **50+** | **последнее HTML-предупреждение админам** (не бан) |
-| далее | если после предупреждения очки **продолжают расти** → **бан 45 дней** + HTML 10 сек + чат |
+| **50+** | **HTML-предупреждение админам** (не бан) |
+| **55+** | после admin-warn, если очки **продолжают расти** → **бан 45 дней** + Discord embed |
 
 Очки подозрительности **никогда не показываются** игроку.
 
-Отложенного бана (5–20 мин) нет. При 50+ сначала предупреждение админам; автобан только если детект продолжается.
+Отложенного бана (5–20 мин) нет. Репорт на 35 не банит; на 50 — warn админам; автобан только с **55+** при продолжающихся детектах.
 
 ## Интеграция
 
@@ -58,7 +58,8 @@ bash build_cmake.sh
     "monitor_threshold": 15,
     "warn_threshold": 25,
     "report_threshold": 35,
-    "ban_threshold": 50,
+    "admin_warn_threshold": 50,
+    "ban_threshold": 55,
     "score_decay_per_minute": 1.2
   },
   "ban": {
@@ -68,7 +69,7 @@ bash build_cmake.sh
   },
   "notes": {
     "reports": "35+ -> css_anticheat_auto_report (PlaytimeReporter ticket API)",
-    "bans": "50+ -> css_anticheat_apply_ban (AdminPlugin + 10s HTML + chat announce)"
+    "bans": "55+ after admin warn -> css_anticheat_apply_ban"
   }
 }
 ```
