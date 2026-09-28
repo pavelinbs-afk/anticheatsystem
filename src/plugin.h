@@ -14,6 +14,8 @@
 class AntiCheatPlugin final : public ISmmPlugin, public IMetamodListener
 {
 public:
+	AntiCheatPlugin();
+
 	bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
 	bool Unload(char* error, size_t maxlen) override;
 
@@ -27,13 +29,22 @@ public:
 	const char* GetLogTag() override		{ return "ANTICHEAT"; }
 
 public:
-	void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick);
-	void Hook_StartupServer(const GameSessionConfiguration_t& config, ISource2WorldSession*, const char*);
-	int  Hook_LoadEventsFromFile(const char* filename, bool bSearchAll);
-	bool Hook_FireEvent(IGameEvent* event, bool bDontBroadcast);
-	void Hook_EntitySystemSpawn(int nCount, const EntitySpawnInfo_t* pInfo);
-	void Hook_ClientPutInServer(CPlayerSlot slot, char const* pszName, int type, uint64 xuid);
-	void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID);
+	KHook::Return<void> Hook_GameFrame(ISource2Server*, bool simulating, bool bFirstTick, bool bLastTick);
+	KHook::Return<void> Hook_StartupServer(INetworkServerService*, const GameSessionConfiguration_t& config, ISource2WorldSession*, const char*);
+	KHook::Return<int>  Hook_LoadEventsFromFile(IGameEventManager2* pThis, const char* filename, bool bSearchAll);
+	KHook::Return<bool> Hook_FireEvent(IGameEventManager2* pThis, IGameEvent* event, bool bDontBroadcast);
+	KHook::Return<void> Hook_EntitySystemSpawn(CEntitySystem* pThis, int nCount, const EntitySpawnInfo_t* pInfo);
+	KHook::Return<void> Hook_ClientPutInServer(IServerGameClients*, CPlayerSlot slot, char const* pszName, int type, uint64 xuid);
+	KHook::Return<void> Hook_ClientDisconnect(IServerGameClients*, CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID);
+
+protected:
+	KHook::Virtual<ISource2Server, void, bool, bool, bool> m_GameFrame;
+	KHook::Virtual<INetworkServerService, void, const GameSessionConfiguration_t&, ISource2WorldSession*, const char*> m_StartupServer;
+	KHook::Virtual<IGameEventManager2, int, const char*, bool> m_LoadEventsFromFile;
+	KHook::Virtual<IGameEventManager2, bool, IGameEvent*, bool> m_FireEvent;
+	KHook::Virtual<CEntitySystem, void, int, const EntitySpawnInfo_t*> m_EntitySystemSpawn;
+	KHook::Virtual<IServerGameClients, void, CPlayerSlot, char const*, int, uint64> m_ClientPutInServer;
+	KHook::Virtual<IServerGameClients, void, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*> m_ClientDisconnect;
 };
 
 extern AntiCheatPlugin g_AntiCheatPlugin;

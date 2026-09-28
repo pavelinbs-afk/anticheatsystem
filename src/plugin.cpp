@@ -23,9 +23,8 @@ CGameEntitySystem* GameEntitySystem()
 	return g_pGameEntitySystem;
 }
 
-static int g_iEventMgrHookId = 0;
-static int g_iFireEventHookId = 0;
-static int g_iEntSysHookId = 0;
+static void* g_pEventMgrVtbl = nullptr;
+static void* g_pEntSysVtbl = nullptr;
 
 #ifdef _WIN32
 #define SERVER_LIB "server.dll"
@@ -33,19 +32,39 @@ static int g_iEntSysHookId = 0;
 #define SERVER_LIB "/libserver.so"
 #endif
 
+// Engine only passes this by reference; KHook needs a complete type for sizeof.
 class GameSessionConfiguration_t
 {
 };
 
-SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
-SH_DECL_HOOK3_void(INetworkServerService, StartupServer, SH_NOATTRIB, 0, const GameSessionConfiguration_t&, ISource2WorldSession*, const char*);
-SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, 0, int, const char*, bool);
-SH_DECL_HOOK2(IGameEventManager2, FireEvent, SH_NOATTRIB, 0, bool, IGameEvent*, bool);
-SH_DECL_HOOK2_void(CEntitySystem, Spawn, SH_NOATTRIB, 0, int, const EntitySpawnInfo_t*);
-SH_DECL_HOOK4_void(IServerGameClients, ClientPutInServer, SH_NOATTRIB, 0, CPlayerSlot, char const*, int, uint64);
-SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*);
+template <typename CLASS, typename RETURN, typename... ARGS>
+static void AddGlobalByVtbl(KHook::Virtual<CLASS, RETURN, ARGS...>& hook, void* vtbl)
+{
+	struct { void* v; } fake{ vtbl };
+	hook.AddGlobal(reinterpret_cast<CLASS*>(&fake));
+}
+
+template <typename CLASS, typename RETURN, typename... ARGS>
+static void RemoveGlobalByVtbl(KHook::Virtual<CLASS, RETURN, ARGS...>& hook, void* vtbl)
+{
+	if (!vtbl)
+		return;
+	struct { void* v; } fake{ vtbl };
+	hook.RemoveGlobal(reinterpret_cast<CLASS*>(&fake));
+}
 
 static IServerGameClients* g_pGameClients = nullptr;
+
+AntiCheatPlugin::AntiCheatPlugin() :
+	m_GameFrame(&ISource2Server::GameFrame, this, nullptr, &AntiCheatPlugin::Hook_GameFrame),
+	m_StartupServer(&INetworkServerService::StartupServer, this, nullptr, &AntiCheatPlugin::Hook_StartupServer),
+	m_LoadEventsFromFile(&IGameEventManager2::LoadEventsFromFile, this, &AntiCheatPlugin::Hook_LoadEventsFromFile, nullptr),
+	m_FireEvent(&IGameEventManager2::FireEvent, this, &AntiCheatPlugin::Hook_FireEvent, nullptr),
+	m_EntitySystemSpawn(&CEntitySystem::Spawn, this, nullptr, &AntiCheatPlugin::Hook_EntitySystemSpawn),
+	m_ClientPutInServer(&IServerGameClients::ClientPutInServer, this, nullptr, &AntiCheatPlugin::Hook_ClientPutInServer),
+	m_ClientDisconnect(&IServerGameClients::ClientDisconnect, this, nullptr, &AntiCheatPlugin::Hook_ClientDisconnect)
+{
+}
 
 void AC_Log(const char* fmt, ...)
 {
@@ -80,37 +99,28 @@ bool AntiCheatPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 
 	g_SMAPI->AddListener(this, this);
 
-	SH_ADD_HOOK(IServerGameDLL, GameFrame, g_pServer, SH_MEMBER(this, &AntiCheatPlugin::Hook_GameFrame), true);
-	SH_ADD_HOOK(INetworkServerService, StartupServer, g_pNetServerService, SH_MEMBER(this, &AntiCheatPlugin::Hook_StartupServer), true);
-	SH_ADD_HOOK(IServerGameClients, ClientPutInServer, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientPutInServer), true);
-	SH_ADD_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientDisconnect), true);
+	m_GameFrame.Add(g_pServer);
+	m_StartupServer.Add(g_pNetServerService);
+	m_ClientPutInServer.Add(g_pGameClients);
+	m_ClientDisconnect.Add(g_pGameClients);
 
-	if (void* pEventMgrVtbl = FindVirtualTable(SERVER_LIB, "CGameEventManager"))
-	{
-		auto* pMgrAsIface = reinterpret_cast<IGameEventManager2*>(pEventMgrVtbl);
-		g_iEventMgrHookId = SH_ADD_DVPHOOK(IGameEventManager2, LoadEventsFromFile,
-			pMgrAsIface, SH_MEMBER(this, &AntiCheatPlugin::Hook_LoadEventsFromFile), false);
-		// Mid-map / late load: LoadEventsFromFile may never run again — capture mgr on FireEvent.
-		g_iFireEventHookId = SH_ADD_DVPHOOK(IGameEventManager2, FireEvent,
-			pMgrAsIface, SH_MEMBER(this, &AntiCheatPlugin::Hook_FireEvent), false);
-	}
-	else
+	g_pEventMgrVtbl = FindVirtualTable(SERVER_LIB, "CGameEventManager");
+	if (!g_pEventMgrVtbl)
 	{
 		V_strncpy(error, "Failed to locate CGameEventManager vtable", maxlen);
 		return false;
 	}
+	AddGlobalByVtbl(m_LoadEventsFromFile, g_pEventMgrVtbl);
+	// Mid-map / late load: LoadEventsFromFile may never run again — capture mgr on FireEvent.
+	AddGlobalByVtbl(m_FireEvent, g_pEventMgrVtbl);
 
-	if (void* pEntSysVtbl = FindVirtualTable(SERVER_LIB, "CGameEntitySystem"))
-	{
-		g_iEntSysHookId = SH_ADD_DVPHOOK(CEntitySystem, Spawn,
-			reinterpret_cast<CEntitySystem*>(pEntSysVtbl),
-			SH_MEMBER(this, &AntiCheatPlugin::Hook_EntitySystemSpawn), true);
-	}
-	else
+	g_pEntSysVtbl = FindVirtualTable(SERVER_LIB, "CGameEntitySystem");
+	if (!g_pEntSysVtbl)
 	{
 		V_strncpy(error, "Failed to locate CGameEntitySystem vtable", maxlen);
 		return false;
 	}
+	AddGlobalByVtbl(m_EntitySystemSpawn, g_pEntSysVtbl);
 
 	if (!AntiCheatCore::GetInstance()->Initialize())
 	{
@@ -128,76 +138,77 @@ bool AntiCheatPlugin::Unload(char* error, size_t maxlen)
 	Events_Unregister();
 	AntiCheatCore::GetInstance()->Shutdown();
 
-	SH_REMOVE_HOOK(IServerGameDLL, GameFrame, g_pServer, SH_MEMBER(this, &AntiCheatPlugin::Hook_GameFrame), true);
-	SH_REMOVE_HOOK(INetworkServerService, StartupServer, g_pNetServerService, SH_MEMBER(this, &AntiCheatPlugin::Hook_StartupServer), true);
-	SH_REMOVE_HOOK(IServerGameClients, ClientPutInServer, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientPutInServer), true);
-	SH_REMOVE_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &AntiCheatPlugin::Hook_ClientDisconnect), true);
-	if (g_iEventMgrHookId)
-		SH_REMOVE_HOOK_ID(g_iEventMgrHookId);
-	if (g_iFireEventHookId)
-		SH_REMOVE_HOOK_ID(g_iFireEventHookId);
-	if (g_iEntSysHookId)
-		SH_REMOVE_HOOK_ID(g_iEntSysHookId);
+	m_GameFrame.Remove(g_pServer);
+	m_StartupServer.Remove(g_pNetServerService);
+	m_ClientPutInServer.Remove(g_pGameClients);
+	m_ClientDisconnect.Remove(g_pGameClients);
+	RemoveGlobalByVtbl(m_LoadEventsFromFile, g_pEventMgrVtbl);
+	RemoveGlobalByVtbl(m_FireEvent, g_pEventMgrVtbl);
+	RemoveGlobalByVtbl(m_EntitySystemSpawn, g_pEntSysVtbl);
+	g_pEventMgrVtbl = nullptr;
+	g_pEntSysVtbl = nullptr;
 
 	AC_Log("unloaded");
 	return true;
 }
 
-void AntiCheatPlugin::Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick)
+KHook::Return<void> AntiCheatPlugin::Hook_GameFrame(ISource2Server*, bool simulating, bool bFirstTick, bool bLastTick)
 {
 	Events_TryRegister();
 	if (simulating)
 		AntiCheatCore::GetInstance()->OnGameFrame();
+	return { KHook::Action::Ignore };
 }
 
-void AntiCheatPlugin::Hook_StartupServer(const GameSessionConfiguration_t&, ISource2WorldSession*, const char*)
+KHook::Return<void> AntiCheatPlugin::Hook_StartupServer(INetworkServerService*, const GameSessionConfiguration_t&, ISource2WorldSession*, const char*)
 {
 	Events_OnStartupServer();
+	return { KHook::Action::Ignore };
 }
 
-int AntiCheatPlugin::Hook_LoadEventsFromFile(const char* filename, bool bSearchAll)
+KHook::Return<int> AntiCheatPlugin::Hook_LoadEventsFromFile(IGameEventManager2* pThis, const char* filename, bool bSearchAll)
 {
 	(void)filename;
 	(void)bSearchAll;
-	if (!g_pGameEventManager)
-		g_pGameEventManager = META_IFACEPTR(IGameEventManager2);
-	RETURN_META_VALUE(MRES_IGNORED, 0);
+	if (!g_pGameEventManager && pThis)
+		g_pGameEventManager = pThis;
+	return { KHook::Action::Ignore };
 }
 
-bool AntiCheatPlugin::Hook_FireEvent(IGameEvent* event, bool bDontBroadcast)
+KHook::Return<bool> AntiCheatPlugin::Hook_FireEvent(IGameEventManager2* pThis, IGameEvent* event, bool bDontBroadcast)
 {
 	(void)event;
 	(void)bDontBroadcast;
-	if (!g_pGameEventManager)
+	if (!g_pGameEventManager && pThis)
 	{
-		g_pGameEventManager = META_IFACEPTR(IGameEventManager2);
-		if (g_pGameEventManager)
-			AC_Log("game event manager captured via FireEvent");
+		g_pGameEventManager = pThis;
+		AC_Log("game event manager captured via FireEvent");
 	}
-	RETURN_META_VALUE(MRES_IGNORED, true);
+	return { KHook::Action::Ignore };
 }
 
-void AntiCheatPlugin::Hook_EntitySystemSpawn(int nCount, const EntitySpawnInfo_t* pInfo)
+KHook::Return<void> AntiCheatPlugin::Hook_EntitySystemSpawn(CEntitySystem* pThis, int nCount, const EntitySpawnInfo_t* pInfo)
 {
-	if (!g_pGameEntitySystem)
-		g_pGameEntitySystem = reinterpret_cast<CGameEntitySystem*>(META_IFACEPTR(CEntitySystem));
+	(void)nCount;
+	(void)pInfo;
+	if (!g_pGameEntitySystem && pThis)
+		g_pGameEntitySystem = reinterpret_cast<CGameEntitySystem*>(pThis);
+	return { KHook::Action::Ignore };
 }
 
-void AntiCheatPlugin::Hook_ClientPutInServer(CPlayerSlot slot, char const* pszName, int type, uint64 xuid)
+KHook::Return<void> AntiCheatPlugin::Hook_ClientPutInServer(IServerGameClients*, CPlayerSlot slot, char const* pszName, int type, uint64 xuid)
 {
 	(void)type;
 	int iSlot = slot.Get();
-	if (iSlot < 0 || iSlot >= AC_MAXPLAYERS)
-		return;
-	if (!xuid)
-		return;
-	AntiCheatCore::GetInstance()->OnPlayerConnect(iSlot, xuid, pszName ? pszName : "");
+	if (iSlot >= 0 && iSlot < AC_MAXPLAYERS && xuid)
+		AntiCheatCore::GetInstance()->OnPlayerConnect(iSlot, xuid, pszName ? pszName : "");
+	return { KHook::Action::Ignore };
 }
 
-void AntiCheatPlugin::Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason, const char*, uint64 xuid, const char*)
+KHook::Return<void> AntiCheatPlugin::Hook_ClientDisconnect(IServerGameClients*, CPlayerSlot slot, ENetworkDisconnectionReason, const char*, uint64 xuid, const char*)
 {
 	int iSlot = slot.Get();
-	if (iSlot < 0 || iSlot >= AC_MAXPLAYERS)
-		return;
-	AntiCheatCore::GetInstance()->OnPlayerDisconnect(iSlot, xuid);
+	if (iSlot >= 0 && iSlot < AC_MAXPLAYERS)
+		AntiCheatCore::GetInstance()->OnPlayerDisconnect(iSlot, xuid);
+	return { KHook::Action::Ignore };
 }
