@@ -101,6 +101,62 @@ void AntiCheatCore::Shutdown()
 	AC_Log("core shutdown");
 }
 
+void AntiCheatCore::PrintStatus() const
+{
+	int tracked = (int)m_PlayerProfiles.size();
+	int slots = 0;
+	for (int i = 0; i < AC_MAXPLAYERS; ++i)
+	{
+		if (m_SlotToSteam[i])
+			++slots;
+	}
+
+	const char* discord = (m_DiscordWebhook) ? m_DiscordWebhook->GetStatusLabel() : "n/a";
+	const bool backendOn = m_BackendClient && m_BackendClient->IsEnabled();
+	const char* backendUrl = (m_BackendClient && !m_BackendClient->GetBaseUrl().empty())
+		? m_BackendClient->GetBaseUrl().c_str()
+		: "(empty)";
+
+	Msg("  core        : OK\n");
+	Msg("  players     : tracked=%d slots_mapped=%d staff_exempt=%zu\n",
+		tracked, slots, m_StaffExempt ? m_StaffExempt->Size() : 0);
+	Msg("  discord_wh  : %s\n", discord);
+	Msg("  backend     : %s url=%s token=%s\n",
+		backendOn ? "ON" : "OFF",
+		backendUrl,
+		(m_Config.backend_api_token.empty() ? "missing" : "set"));
+	Msg("  thresholds  : monitor=%.0f warn=%.0f report=%.0f admin_warn=%.0f ban=%.0f decay=%.2f/min\n",
+		m_Config.monitor_threshold, m_Config.warn_threshold, m_Config.report_threshold,
+		m_Config.admin_warn_threshold, m_Config.ban_threshold,
+		m_Config.score_decay_per_second * 60.0f);
+	Msg("  ban         : days=%d reason=\"%s\"\n",
+		m_Config.ban_duration_days, m_Config.ban_reason.c_str());
+	Msg("  modules     : aim=%d wh=%d move=%d stats=%d fps=%d shots=%d combat=%d netsafe=%d filescan=%d\n",
+		(int)m_Config.enable_aim_detection,
+		(int)m_Config.enable_wallhack_detection,
+		(int)m_Config.enable_movement_detection,
+		(int)m_Config.enable_stats_tracking,
+		(int)m_Config.enable_fps_drop_detection,
+		(int)m_Config.enable_shot_tracking,
+		(int)m_Config.enable_combat_heuristics,
+		(int)m_Config.enable_network_safety,
+		(int)m_Config.enable_game_file_scan);
+	Msg("  subsystems  : aim=%d wh=%d move=%d stats=%d fps=%d shot=%d combat=%d net=%d scorer=%d scan=%d backend=%d discord=%d staff=%d\n",
+		m_AimAnalyzer ? 1 : 0,
+		m_WallhackDetector ? 1 : 0,
+		m_MovementAnalyzer ? 1 : 0,
+		m_StatisticsTracker ? 1 : 0,
+		m_FpsDropDetector ? 1 : 0,
+		m_ShotTracker ? 1 : 0,
+		m_CombatHeuristics ? 1 : 0,
+		m_NetworkSafety ? 1 : 0,
+		m_SuspicionScorer ? 1 : 0,
+		m_GameFileScanner ? 1 : 0,
+		m_BackendClient ? 1 : 0,
+		m_DiscordWebhook ? 1 : 0,
+		m_StaffExempt ? 1 : 0);
+}
+
 std::string AntiCheatCore::GetClientIpForSlot(int slot)
 {
 	if (!g_pEngine || slot < 0)

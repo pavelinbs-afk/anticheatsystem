@@ -8,6 +8,7 @@
 #include "anticheat_core.h"
 #include "vtable_finder.h"
 #include "players.h"
+#include "commands.h"
 
 AntiCheatPlugin g_AntiCheatPlugin;
 PLUGIN_EXPOSE(AntiCheatPlugin, g_AntiCheatPlugin);
@@ -127,6 +128,8 @@ bool AntiCheatPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 		V_strncpy(error, "AntiCheatCore init failed", maxlen);
 		return false;
 	}
+
+	Commands_Register();
 
 	AC_Log("loaded %s v%s (%s)", GetName(), GetVersion(), GetDate());
 	META_CONPRINTF("[%s] Loaded %s v%s\n", GetLogTag(), GetName(), GetVersion());

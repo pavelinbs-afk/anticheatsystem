@@ -22,6 +22,35 @@ void DiscordWebhook::SetWebhookUrl(const std::string& url)
 		(m_webhookUrl.find("https://discord.com/api/webhooks/") == 0 ||
 		 m_webhookUrl.find("https://discordapp.com/api/webhooks/") == 0);
 
+	if (m_webhookUrl.empty())
+	{
+		m_statusLabel = "off (empty url)";
+	}
+	else if (!m_enabled)
+	{
+		m_statusLabel = "INVALID (need https://discord.com/api/webhooks/...)";
+	}
+	else
+	{
+		// Mask token: show webhook id only.
+		std::string id = "?";
+		const char* prefixA = "https://discord.com/api/webhooks/";
+		const char* prefixB = "https://discordapp.com/api/webhooks/";
+		size_t start = 0;
+		if (m_webhookUrl.find(prefixA) == 0)
+			start = std::strlen(prefixA);
+		else if (m_webhookUrl.find(prefixB) == 0)
+			start = std::strlen(prefixB);
+		if (start > 0)
+		{
+			size_t slash = m_webhookUrl.find('/', start);
+			id = (slash == std::string::npos)
+				? m_webhookUrl.substr(start)
+				: m_webhookUrl.substr(start, slash - start);
+		}
+		m_statusLabel = std::string("ON (id=") + id + ", token=***)";
+	}
+
 	if (IsEnabled() && !m_workerStarted)
 	{
 		m_workerStarted = true;

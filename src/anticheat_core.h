@@ -44,6 +44,7 @@ public:
 	PlayerProfile* GetPlayerBySlot(int slot);
 	PlayerProfile* GetPlayerProfile(uint64_t steamID);
 	const AntiCheatConfig& GetConfig() const { return m_Config; }
+	void PrintStatus() const;
 
 private:
 	AntiCheatCore() = default;

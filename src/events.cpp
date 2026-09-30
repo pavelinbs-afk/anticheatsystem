@@ -153,3 +153,8 @@ void Events_OnStartupServer()
 	s_iRetryThrottle = 0;
 	s_iBadSlotLogs = 0;
 }
+
+bool Events_AreRegistered()
+{
+	return s_bRegistered;
+}

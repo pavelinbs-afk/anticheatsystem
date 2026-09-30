@@ -20,7 +20,8 @@ class DiscordWebhook {
 public:
 	void SetWebhookUrl(const std::string& url);
 	bool IsEnabled() const { return m_enabled && !m_webhookUrl.empty(); }
-
+	/// Human status for ac_status (no full token): off / invalid / on (masked id).
+	const char* GetStatusLabel() const { return m_statusLabel.c_str(); }
 	void NotifyBan(const DiscordBanNotify& ban);
 
 private:
@@ -32,6 +33,7 @@ private:
 
 	bool m_enabled = false;
 	std::string m_webhookUrl;
+	std::string m_statusLabel = "off (empty url)";
 
 	std::mutex m_mu;
 	std::deque<DiscordBanNotify> m_queue;
