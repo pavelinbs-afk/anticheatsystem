@@ -154,7 +154,7 @@ void StaffExemptList::Reload()
 		ParseExemptSteamIds(json, next, 95); // Ст. Модератор+
 
 	m_exempt.swap(next);
-	AC_Log("staff exempt reload path=%s count=%d (imm>=95)",
+	AC_LogDebug("staff exempt reload path=%s count=%d (imm>=95)",
 		used.empty() ? "none" : used.c_str(), (int)m_exempt.size());
 }
 

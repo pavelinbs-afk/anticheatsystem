@@ -87,7 +87,7 @@ void AntiCheatCore::AddSoftScore(uint64_t steamId, const char* module, float sco
 	if (m_Config.enable_network_safety && m_NetworkSafety && netProfile &&
 		m_NetworkSafety->ShouldVetoSoftDetections(*netProfile))
 	{
-		AC_Log("network veto +%.1f [%s] steam=%llu ping=%.0f jitter=%.0f (soft detect skipped)",
+		AC_LogDebug("network veto +%.1f [%s] steam=%llu ping=%.0f jitter=%.0f (soft detect skipped)",
 			score, module, (unsigned long long)steamId,
 			netProfile->lastPingMs, netProfile->lastJitterMs);
 		return;
@@ -121,6 +121,7 @@ void AntiCheatCore::PrintStatus() const
 	Msg("  players     : tracked=%d slots_mapped=%d staff_exempt=%zu\n",
 		tracked, slots, m_StaffExempt ? m_StaffExempt->Size() : 0);
 	Msg("  discord_wh  : %s\n", discord);
+	Msg("  debug_log   : %s\n", AC_IsDebugLogEnabled() ? "ON" : "OFF");
 	Msg("  backend     : %s url=%s token=%s\n",
 		backendOn ? "ON" : "OFF",
 		backendUrl,

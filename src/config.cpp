@@ -202,6 +202,7 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "shot_min_hit_distance", d)) cfg.shot_min_hit_distance = (float)d;
 	if (JsonFindNumber(json, "shot_min_shots_before_score", d)) cfg.shot_min_shots_before_score = (int)d;
 	if (JsonFindBool(json, "enable_backend_check", b)) cfg.enable_backend_check = b;
+	if (JsonFindBool(json, "enable_debug_log", b)) cfg.enable_debug_log = b;
 	{
 		std::string s;
 		if (JsonFindString(json, "backend_api_url", s)) cfg.backend_api_url = s;
@@ -210,8 +211,9 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 		if (JsonFindString(json, "discord_webhook_url", s)) cfg.discord_webhook_url = s;
 	}
 
-	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f snap>=%.0f backend=%d)",
+	AC_SetDebugLog(cfg.enable_debug_log);
+	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f snap>=%.0f backend=%d debug=%d)",
 		usedPath.c_str(), cfg.ban_threshold, cfg.report_threshold,
-		cfg.snap_angle_threshold, (int)cfg.enable_backend_check);
+		cfg.snap_angle_threshold, (int)cfg.enable_backend_check, (int)cfg.enable_debug_log);
 	return cfg;
 }

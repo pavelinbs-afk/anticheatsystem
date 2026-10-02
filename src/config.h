@@ -23,6 +23,10 @@ struct AntiCheatConfig {
 	int ban_countdown_seconds = 10;
 	std::string discord_webhook_url = ""; // Discord embed on auto-ban (empty = off)
 
+	// Verbose console spam (staff reload, file scan ok, score ticks, shot traces).
+	// Important events (ban/report/warn/critical) always use AC_Log / AC_LogCritical.
+	bool enable_debug_log = false;
+
 	bool enable_aim_detection = true;
 	bool enable_wallhack_detection = true;
 	bool enable_smoke_detection = true;

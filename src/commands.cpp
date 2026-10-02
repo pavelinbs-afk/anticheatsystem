@@ -80,6 +80,7 @@ CON_COMMAND_F(ac_status, "AntiCheat status: version, webhook, backend, modules, 
 		g_pGameEntitySystem ? 1 : 0,
 		g_pCVar ? 1 : 0);
 	Msg("  events_hook : %s\n", Events_AreRegistered() ? "OK (listeners attached)" : "PENDING / not hooked yet");
+	Msg("  debug_log   : %s (ac_debug 0|1)\n", AC_IsDebugLogEnabled() ? "ON" : "OFF");
 
 	if (AntiCheatCore* core = AntiCheatCore::GetInstance())
 		core->PrintStatus();
@@ -87,4 +88,20 @@ CON_COMMAND_F(ac_status, "AntiCheat status: version, webhook, backend, modules, 
 		Msg("  core        : NOT INITIALIZED\n");
 
 	Msg("===========================================\n");
+}
+
+CON_COMMAND_F(ac_debug, "ac_debug <0|1> — toggle verbose anticheat debug log", FCVAR_RELEASE | FCVAR_GAMEDLL)
+{
+	(void)context;
+	if (args.ArgC() < 2)
+	{
+		Msg("[anticheat] debug_log=%s (usage: ac_debug 0|1)\n",
+			AC_IsDebugLogEnabled() ? "ON" : "OFF");
+		return;
+	}
+
+	const char* v = args.Arg(1);
+	const bool on = (v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y'));
+	AC_SetDebugLog(on);
+	Msg("[anticheat] debug_log=%s\n", on ? "ON" : "OFF");
 }

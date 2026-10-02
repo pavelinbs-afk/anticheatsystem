@@ -67,6 +67,18 @@ AntiCheatPlugin::AntiCheatPlugin() :
 {
 }
 
+static bool g_acDebugLog = false;
+
+void AC_SetDebugLog(bool enabled)
+{
+	g_acDebugLog = enabled;
+}
+
+bool AC_IsDebugLogEnabled()
+{
+	return g_acDebugLog;
+}
+
 void AC_Log(const char* fmt, ...)
 {
 	char buf[512];
@@ -75,6 +87,18 @@ void AC_Log(const char* fmt, ...)
 	V_vsnprintf(buf, sizeof(buf), fmt, va);
 	va_end(va);
 	ConColorMsg(Color(120, 200, 120, 255), "[anticheat] %s\n", buf);
+}
+
+void AC_LogDebug(const char* fmt, ...)
+{
+	if (!g_acDebugLog)
+		return;
+	char buf[512];
+	va_list va;
+	va_start(va, fmt);
+	V_vsnprintf(buf, sizeof(buf), fmt, va);
+	va_end(va);
+	ConColorMsg(Color(140, 160, 140, 255), "[anticheat][debug] %s\n", buf);
 }
 
 void AC_LogCritical(const char* fmt, ...)

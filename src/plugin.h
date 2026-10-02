@@ -24,7 +24,7 @@ public:
 	const char* GetDescription() override	{ return "CS2 server-side anticheat (MetaMod)"; }
 	const char* GetURL() override			{ return ""; }
 	const char* GetLicense() override		{ return "Proprietary"; }
-	const char* GetVersion() override		{ return "1.1.5"; }
+	const char* GetVersion() override		{ return "1.1.6"; }
 	const char* GetDate() override			{ return __DATE__; }
 	const char* GetLogTag() override		{ return "ANTICHEAT"; }
 
@@ -61,4 +61,7 @@ inline CGlobalVars* GetGlobals()
 }
 
 void AC_Log(const char* fmt, ...);
+void AC_LogDebug(const char* fmt, ...);
 void AC_LogCritical(const char* fmt, ...);
+void AC_SetDebugLog(bool enabled);
+bool AC_IsDebugLogEnabled();

@@ -183,17 +183,17 @@ void GameFileScanner::LogSnapshot(const char* tag, const std::vector<GameFileSna
 		if (s.exists)
 		{
 			++ok;
-			AC_Log("%s file ok %s sev=%d size=%llu hash=%016llx",
+			AC_LogDebug("%s file ok %s sev=%d size=%llu hash=%016llx",
 				tag, s.relativePath.c_str(), (int)s.severity,
 				(unsigned long long)s.size, (unsigned long long)s.hash);
 		}
 		else
 		{
 			++missing;
-			AC_Log("%s file missing %s sev=%d", tag, s.relativePath.c_str(), (int)s.severity);
+			AC_LogDebug("%s file missing %s sev=%d", tag, s.relativePath.c_str(), (int)s.severity);
 		}
 	}
-	AC_Log("%s summary: ok=%d missing=%d gamedir=%s", tag, ok, missing, m_gameDir);
+	AC_LogDebug("%s summary: ok=%d missing=%d gamedir=%s", tag, ok, missing, m_gameDir);
 }
 
 void GameFileScanner::DiffAgainstBaseline(const std::vector<GameFileSnapshot>& now, IntegrityScanResult& out) const
@@ -283,7 +283,7 @@ void GameFileScanner::ScanAtStartup()
 		return;
 	}
 
-	AC_Log("[files] startup scan gamedir=%s", m_gameDir);
+	AC_LogDebug("[files] startup scan gamedir=%s", m_gameDir);
 	m_baseline = ReadAll();
 	m_baselineByPath.clear();
 	for (const auto& s : m_baseline)
@@ -302,7 +302,7 @@ IntegrityScanResult GameFileScanner::ScanNow(const char* tag)
 	if (!m_enabled || !m_gameDir[0])
 		return result;
 
-	AC_Log("[files] scan tag=%s", tag ? tag : "?");
+	AC_LogDebug("[files] scan tag=%s", tag ? tag : "?");
 	const auto now = ReadAll();
 	DiffAgainstBaseline(now, result);
 
@@ -325,7 +325,7 @@ IntegrityScanResult GameFileScanner::ScanNow(const char* tag)
 	}
 	else if (!result.anyChange)
 	{
-		AC_Log("[files] scan ok (unchanged) tag=%s", tag ? tag : "?");
+		AC_LogDebug("[files] scan ok (unchanged) tag=%s", tag ? tag : "?");
 	}
 
 	return result;
@@ -333,7 +333,7 @@ IntegrityScanResult GameFileScanner::ScanNow(const char* tag)
 
 IntegrityScanResult GameFileScanner::ScanOnPlayerJoin(uint64_t steamId, const char* playerName)
 {
-	AC_Log("[files] join scan steam=%llu name=%s",
+	AC_LogDebug("[files] join scan steam=%llu name=%s",
 		(unsigned long long)steamId, playerName ? playerName : "");
 
 	// Monitor only — never ban/kick the connecting player for server-side file state.

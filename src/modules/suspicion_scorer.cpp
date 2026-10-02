@@ -25,7 +25,7 @@ void SuspicionScorer::AddScore(uint64_t steamId, const std::string& module, floa
 	if (admin_warned_.count(steamId) && !banned_.count(steamId))
 		continued_after_warn_.insert(steamId);
 
-	AC_Log("score +%.1f [%s] steam=%llu reason=%s total=%.1f",
+	AC_LogDebug("score +%.1f [%s] steam=%llu reason=%s total=%.1f",
 		score, module.c_str(), (unsigned long long)steamId, reason.c_str(),
 		player_scores_[steamId].score);
 }
