@@ -132,7 +132,7 @@ void AntiCheatCore::PrintStatus() const
 		m_Config.score_decay_per_second * 60.0f);
 	Msg("  ban         : days=%d reason=\"%s\"\n",
 		m_Config.ban_duration_days, m_Config.ban_reason.c_str());
-	Msg("  modules     : aim=%d wh=%d move=%d stats=%d fps=%d shots=%d combat=%d netsafe=%d filescan=%d\n",
+	Msg("  modules     : aim=%d wh=%d move=%d stats=%d fps=%d shots=%d combat=%d netsafe=%d server_filescan=%d (client files N/A)\n",
 		(int)m_Config.enable_aim_detection,
 		(int)m_Config.enable_wallhack_detection,
 		(int)m_Config.enable_movement_detection,
@@ -328,9 +328,6 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 
 	m_PlayerProfiles[steamID] = profile;
 	m_SlotToSteam[slot] = steamID;
-
-	if (m_GameFileScanner && m_Config.enable_game_file_scan)
-		m_GameFileScanner->ScanOnPlayerJoin(steamID, profile->name.c_str());
 
 	if (IsStaffExempt(steamID))
 	{

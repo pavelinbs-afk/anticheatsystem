@@ -28,7 +28,8 @@ struct IntegrityScanResult {
 	std::string reason;
 };
 
-// Server gamedir + soft plugin memory check. Never bans players — client files are not readable.
+// Optional watch of the dedicated SERVER gamedir (plugin binary, server gameinfo.gi).
+// Client game files are not readable from a CS2 dedicated server — do not use this as a cheat check.
 class GameFileScanner {
 public:
 	GameFileScanner() = default;

@@ -23,8 +23,8 @@ struct Spec {
 	Sev sev;
 };
 
-// Critical = plugin/loader/game identity (log + alert only — NEVER ban players).
-// Watch = configs that admins may edit (log only).
+// SERVER paths only (dedicated gamedir). Client gameinfo.gi / steam.inf are unreachable.
+// Log + alert only — NEVER ban players for this.
 static const Spec kWatchSpecs[] = {
 	{ "addons/anticheat/bin/linuxsteamrt64/anticheat.so", Sev::Critical },
 	{ "addons/anticheat/bin/win64/anticheat.dll", Sev::Critical },

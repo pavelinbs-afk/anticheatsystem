@@ -34,7 +34,9 @@ struct AntiCheatConfig {
 	bool enable_stats_tracking = true;
 	bool enable_movement_detection = true;
 	bool enable_fps_drop_detection = false;
-	bool enable_game_file_scan = true;
+	// Optional: watch SERVER gamedir (anticheat.so / gameinfo.gi on the dedicated host).
+	// Cannot read client files — CS2 dedicated has no access to player gameinfo.gi.
+	bool enable_game_file_scan = false;
 
 	// WH / smoke
 	float wh_track_fov_deg = 3.0f;
