@@ -50,7 +50,11 @@ static std::string TagFromDetection(const std::string& module, const std::string
 		return "wh (smoke)";
 	if (ReasonHas(reason, "blind"))
 		return "wh (blind)";
-	if (ReasonHas(reason, "wallbang") || ReasonHas(reason, "prefire"))
+	if (ReasonHas(reason, "prefire"))
+		return "wh (prefire)";
+	if (ReasonHas(reason, "wall track") || ReasonHas(reason, "track"))
+		return "wh (track)";
+	if (ReasonHas(reason, "wallbang"))
 		return "wh (wallbang)";
 	if (module == "WallhackDetector" || ReasonHas(reason, "wallhack"))
 		return "wh";

@@ -38,7 +38,9 @@ bash build_cmake.sh
 
 - Бан → `css_anticheat_apply_ban` → AdminPlugin (`banned_steamids.json` + POST `/api/cs2/sanctions` с `source=anticheat`).
 - Discord → AdminPlugin Bearer POST `/api/cs2/anticheat/ban-notify` → backend шлёт webhook (`CS2_ANTICHEAT_DISCORD_WEBHOOK_URL`). На game-хосте curl не нужен.
+- Bypass/IP check → AdminPlugin Bearer GET `/api/cs2/anticheat/check` (не локальный curl).
 - Репорт → тот же ticket ingest, что `!report` (source `cs2_anticheat`).
+- **Anti-WH / Fog of War:** полноценный FoW (не слать врага за стеной/в тени, bake геометрии, latency preload) — отдельный MetaMod-класс плагинов вроде CS2FOW: хук `ISource2GameEntities::CheckTransmit` + BVH карты + smoke voxels. В нашем SDK `CCheckTransmitInfo` помечен как incomplete (нет надёжного `dont_transmit`), bake/trace worker нет — в **anticheat** сейчас только **детекция** WH (score), не скрытие позиций. Подключать anti-ESP отдельным плагином, не смешивать с scoring.
 
 ## Конфиг
 

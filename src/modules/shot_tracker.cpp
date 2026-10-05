@@ -1,6 +1,11 @@
 #include "shot_tracker.h"
 #include "../plugin.h"
 #include <cmath>
+#include <algorithm>
+
+namespace {
+constexpr size_t kRecentShotsCap = 40;
+}
 
 void ShotTracker::SetConfig(float hitWindowSec, float aimFovDeg, float minHitDistance, int minShotsBeforeScore)
 {
@@ -53,7 +58,7 @@ float ShotTracker::OnWeaponFire(PlayerProfile& shooter, float curtime, const std
 	rec.bestEnemyDist = bestDist;
 
 	shooter.recentShots.push_back(rec);
-	while (shooter.recentShots.size() > 96)
+	while (shooter.recentShots.size() > kRecentShotsCap)
 		shooter.recentShots.pop_front();
 
 	if (shooter.shotsFired <= 5 || (shooter.shotsFired % 40) == 0)
@@ -72,17 +77,20 @@ float ShotTracker::OnWeaponFire(PlayerProfile& shooter, float curtime, const std
 	float suspicion = 0.0f;
 	const float snap = std::max(rec.snapDeg, rec.snapFromPrevShot);
 
-	// Only blatant fire-time rage (huge snap onto enemy). Medium snaps wait for a hit.
-	if (snap >= 75.0f && bestFov <= 4.0f && bestDist >= 200.0f && !enemies.empty())
-	{
-		suspicion += 12.0f;
-		AC_Log("RAGE snap-to-target snap=%.1f fov=%.1f dist=%.0f steam=%llu +12",
-			snap, bestFov, bestDist, (unsigned long long)shooter.steamId);
-	}
-	else if (snap >= 150.0f)
+	// Blatant spin alone (no need for hit) — rare, keep soft score.
+	if (snap >= 150.0f)
 	{
 		suspicion += 5.0f;
 		AC_Log("RAGE snap snap=%.1f steam=%llu +5", snap, (unsigned long long)shooter.steamId);
+	}
+
+	// Snap-to-target: store pending; confirm on hurt (reduces look-around FP).
+	// Huge snap (≥75 onto target) also pending with higher weight — same confirm path.
+	if (snap >= 45.0f && bestFov <= 4.0f && bestDist >= 200.0f && bestSteam != 0 && !enemies.empty())
+	{
+		shooter.pendingRageSnapDeg = snap;
+		shooter.pendingRageSnapUntil = curtime + m_hitWindowSec;
+		shooter.pendingRageSnapTarget = bestSteam;
 	}
 
 	return suspicion;
@@ -93,6 +101,37 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 	(void)damage;
 	float suspicion = 0.0f;
 	const bool head = (hitgroup == 1 || hitgroup == 8);
+
+	// Confirm pending fire-time rage snap onto this victim.
+	if (attacker.pendingRageSnapTarget == victim.steamId &&
+		curtime <= attacker.pendingRageSnapUntil &&
+		attacker.pendingRageSnapDeg >= 45.0f)
+	{
+		const float snap = attacker.pendingRageSnapDeg;
+		if (snap >= 75.0f)
+		{
+			suspicion += head ? 12.0f : 8.0f;
+			AC_Log("RAGE snap-confirm snap=%.1f hs=%d steam=%llu -> %llu +%.0f",
+				snap, (int)head,
+				(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
+		}
+		else
+		{
+			suspicion += head ? 8.0f : 5.0f;
+			AC_Log("RAGE snap-confirm (med) snap=%.1f hs=%d steam=%llu -> %llu +%.0f",
+				snap, (int)head,
+				(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
+		}
+		attacker.pendingRageSnapDeg = 0.0f;
+		attacker.pendingRageSnapUntil = 0.0f;
+		attacker.pendingRageSnapTarget = 0;
+		attacker.aimbotHitStreak++;
+	}
+	else if (curtime > attacker.pendingRageSnapUntil)
+	{
+		attacker.pendingRageSnapDeg = 0.0f;
+		attacker.pendingRageSnapTarget = 0;
+	}
 
 	ShotRecord* matched = nullptr;
 	for (auto it = attacker.recentShots.rbegin(); it != attacker.recentShots.rend(); ++it)
@@ -109,7 +148,6 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 
 	if (!matched)
 	{
-		// Without a fire sample we only trust silent-style off-angle HS.
 		float fov = CalculateFOV(attacker.viewAngles, attacker.position, victim.position);
 		if (head && fov >= m_silentAimFovDeg && distNow >= m_minHitDistance)
 		{
@@ -119,7 +157,7 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 			AC_Log("SILENT-AIM? (no-shot-rec) fov=%.1f dist=%.0f steam=%llu",
 				fov, distNow, (unsigned long long)attacker.steamId);
 		}
-		else
+		else if (suspicion <= 0.0f)
 		{
 			attacker.aimbotHitStreak = 0;
 		}
@@ -136,14 +174,14 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 	const bool rageHit = (snap >= 45.0f && fovAtFire <= 5.0f);
 	const bool silentHit = (fovAtFire >= m_silentAimFovDeg);
 	if (!rageHit && !silentHit && attacker.shotsFired < m_minShotsBeforeScore)
-		return 0.0f;
+		return suspicion;
 	if (dist < m_minHitDistance)
 	{
-		attacker.aimbotHitStreak = 0;
-		return 0.0f;
+		if (suspicion <= 0.0f)
+			attacker.aimbotHitStreak = 0;
+		return suspicion;
 	}
 
-	// Silent aim: hit while view was clearly NOT on victim
 	if (silentHit)
 	{
 		attacker.silentAimHits++;
@@ -157,22 +195,22 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 		return suspicion;
 	}
 
-	// Rage: snap onto victim then hit
 	if (rageHit)
 	{
-		suspicion += head ? 15.0f : 10.0f;
+		// Avoid double-counting with pendingRageSnapConfirm above for same shot.
+		if (suspicion < 5.0f)
+		{
+			suspicion += head ? 15.0f : 10.0f;
+			AC_Log("RAGE hit snap=%.1f fov=%.2f hs=%d dist=%.0f steam=%llu -> %llu +%.0f",
+				snap, fovAtFire, (int)head, dist,
+				(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
+		}
 		attacker.aimbotHitStreak++;
-		AC_Log("RAGE hit snap=%.1f fov=%.2f hs=%d dist=%.0f steam=%llu -> %llu +%.0f",
-			snap, fovAtFire, (int)head, dist,
-			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, suspicion);
 		if (attacker.aimbotHitStreak >= 2)
 			suspicion += 8.0f;
 		return suspicion;
 	}
 
-	// Soft aimbot: on-target + meaningful snap (not perfect static aim).
-	// Perfect FOV without snap is legit — do NOT score it.
-	// CS2AC snap-return: large snap that lands on target then settles.
 	bool snapReturn = false;
 	if (attacker.angleDeltaHistory.size() >= 4)
 	{
@@ -201,7 +239,7 @@ float ShotTracker::OnPlayerHurt(PlayerProfile& attacker, PlayerProfile& victim, 
 		AC_Log("aimbot-like flick HS fov=%.2f snap=%.1f dist=%.0f steam=%llu +6",
 			fovAtFire, snap, dist, (unsigned long long)attacker.steamId);
 	}
-	else
+	else if (suspicion <= 0.0f)
 	{
 		attacker.aimbotHitStreak = 0;
 	}
@@ -222,6 +260,11 @@ float ShotTracker::FlushStale(PlayerProfile& shooter, float curtime)
 		(curtime - shooter.recentShots.front().time) > (m_hitWindowSec * 5.0f))
 	{
 		shooter.recentShots.pop_front();
+	}
+	if (curtime > shooter.pendingRageSnapUntil)
+	{
+		shooter.pendingRageSnapDeg = 0.0f;
+		shooter.pendingRageSnapTarget = 0;
 	}
 	return 0.0f;
 }

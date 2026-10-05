@@ -41,10 +41,10 @@ struct AntiCheatConfig {
 	// Cannot read client files — CS2 dedicated has no access to player gameinfo.gi.
 	bool enable_game_file_scan = false;
 
-	// WH / smoke
-	float wh_track_fov_deg = 3.0f;
-	float wh_min_track_distance = 800.0f;
-	int wh_streak_ticks = 96;
+	// WH / smoke — long distant FOV lock only (avoid accidental peek aim)
+	float wh_track_fov_deg = 3.5f;
+	float wh_min_track_distance = 500.0f;
+	int wh_streak_ticks = 240; // ~3.75s @64 tick (3.5–4s window)
 
 	// Client FPS hitch thresholds (GetRemoteFramerate) — only severe stalls
 	float fps_max_frame_ms = 70.0f;
@@ -62,10 +62,10 @@ struct AntiCheatConfig {
 	float shot_min_hit_distance = 200.0f;
 	int shot_min_shots_before_score = 3;
 
-	// Backend bypass/IP check → GET /api/cs2/anticheat/check (same logic as site /bypass)
+	// Bypass/IP check via AdminPlugin Bearer → GET /api/cs2/anticheat/check (not local curl).
 	bool enable_backend_check = true;
-	std::string backend_api_url = "https://perfecteam.ru";
-	std::string backend_api_token = ""; // Bearer = CS2_FREEZE_SERVICE_TOKEN / CS_PLUGIN_SECRET
+	std::string backend_api_url = "https://perfecteam.ru"; // legacy unused (AdminPlugin freeze API base)
+	std::string backend_api_token = ""; // legacy unused
 
 	static AntiCheatConfig LoadFromFile(const std::string& filepath);
 	/// Writes addons/anticheat/configs/anticheat_status.json (version for AdminPlugin Discord footer).
