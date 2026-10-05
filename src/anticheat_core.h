@@ -45,6 +45,11 @@ public:
 	PlayerProfile* GetPlayerProfile(uint64_t steamID);
 	const AntiCheatConfig& GetConfig() const { return m_Config; }
 	void PrintStatus() const;
+	void RequestDiscordWebhookTest();
+	/// Re-send Discord embed for one already-banned player.
+	bool RequestDiscordWebhookResend(uint64_t steamId, const char* playerName);
+	/// Queue embeds for bans issued by «Античит система» from banned_steamids.json.
+	int RequestDiscordWebhookResendFromBansFile();
 
 private:
 	AntiCheatCore() = default;

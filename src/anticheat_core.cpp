@@ -19,10 +19,15 @@
 #include "staff_exempt.h"
 
 #include <chrono>
+#include <ctime>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <vector>
 #include <cstring>
 #include <string>
 #include <inetchannelinfo.h>
+#include <tier1/utlstring.h>
 
 AntiCheatCore* AntiCheatCore::s_Instance = nullptr;
 
@@ -59,13 +64,14 @@ bool AntiCheatCore::Initialize()
 	m_FpsDropDetector->SetConfig(m_Config.fps_max_frame_ms, m_Config.fps_spike_stddev_ms, m_Config.fps_min_spikes);
 	m_SuspicionScorer->SetThresholds(m_Config.monitor_threshold, m_Config.warn_threshold,
 		m_Config.report_threshold, m_Config.admin_warn_threshold, m_Config.ban_threshold,
-		m_Config.score_decay_per_second);
+		m_Config.score_decay_per_second, m_Config.fast_ban_threshold, m_Config.fast_ban_window_sec);
 	m_ShotTracker->SetConfig(m_Config.shot_hit_window_sec, m_Config.shot_aim_fov_deg,
 		m_Config.shot_min_hit_distance, m_Config.shot_min_shots_before_score);
 	m_GameFileScanner->SetEnabled(m_Config.enable_game_file_scan);
 	m_GameFileScanner->ScanAtStartup();
 	m_BackendClient->SetConfig(m_Config.backend_api_url, m_Config.backend_api_token, m_Config.enable_backend_check);
 	m_DiscordWebhook->SetWebhookUrl(m_Config.discord_webhook_url);
+	AntiCheatConfig::WriteStatusFile(g_AntiCheatPlugin.GetVersion());
 
 	std::memset(m_SlotToSteam, 0, sizeof(m_SlotToSteam));
 	AC_Log("core initialized (shot_track=%d backend=%d discord=%d staff_exempt=%d)",
@@ -111,7 +117,6 @@ void AntiCheatCore::PrintStatus() const
 			++slots;
 	}
 
-	const char* discord = (m_DiscordWebhook) ? m_DiscordWebhook->GetStatusLabel() : "n/a";
 	const bool backendOn = m_BackendClient && m_BackendClient->IsEnabled();
 	const char* backendUrl = (m_BackendClient && !m_BackendClient->GetBaseUrl().empty())
 		? m_BackendClient->GetBaseUrl().c_str()
@@ -120,15 +125,18 @@ void AntiCheatCore::PrintStatus() const
 	Msg("  core        : OK\n");
 	Msg("  players     : tracked=%d slots_mapped=%d staff_exempt=%zu\n",
 		tracked, slots, m_StaffExempt ? m_StaffExempt->Size() : 0);
-	Msg("  discord_wh  : %s\n", discord);
+	Msg("  discord     : via AdminPlugin Bearer → backend /api/cs2/anticheat/ban-notify\n");
+	Msg("  discord_local: %s (legacy local curl unused on ban)\n",
+		(m_DiscordWebhook && m_DiscordWebhook->IsEnabled()) ? m_DiscordWebhook->GetStatusLabel() : "off");
 	Msg("  debug_log   : %s\n", AC_IsDebugLogEnabled() ? "ON" : "OFF");
 	Msg("  backend     : %s url=%s token=%s\n",
 		backendOn ? "ON" : "OFF",
 		backendUrl,
 		(m_Config.backend_api_token.empty() ? "missing" : "set"));
-	Msg("  thresholds  : monitor=%.0f warn=%.0f report=%.0f admin_warn=%.0f ban=%.0f decay=%.2f/min\n",
+	Msg("  thresholds  : monitor=%.0f warn=%.0f report=%.0f admin_warn=%.0f ban=%.0f fast_ban=%.0f/%.0fs decay=%.2f/min\n",
 		m_Config.monitor_threshold, m_Config.warn_threshold, m_Config.report_threshold,
 		m_Config.admin_warn_threshold, m_Config.ban_threshold,
+		m_Config.fast_ban_threshold, m_Config.fast_ban_window_sec,
 		m_Config.score_decay_per_second * 60.0f);
 	Msg("  ban         : days=%d reason=\"%s\"\n",
 		m_Config.ban_duration_days, m_Config.ban_reason.c_str());
@@ -156,6 +164,193 @@ void AntiCheatCore::PrintStatus() const
 		m_BackendClient ? 1 : 0,
 		m_DiscordWebhook ? 1 : 0,
 		m_StaffExempt ? 1 : 0);
+}
+
+void AntiCheatCore::RequestDiscordWebhookTest()
+{
+	AC_Log("ac_webhook_test: via AdminPlugin → backend Discord");
+	AdminBridge_DiscordTest();
+}
+
+bool AntiCheatCore::RequestDiscordWebhookResend(uint64_t steamId, const char* playerName)
+{
+	if (steamId == 0)
+	{
+		AC_Log("ac_webhook_resend: invalid steamid");
+		return false;
+	}
+
+	const char* map = "resend";
+	if (CGlobalVars* gv = GetGlobals())
+	{
+		const char* m = STRING(gv->mapname);
+		if (m && m[0])
+			map = m;
+	}
+	const std::string detectReason = m_SuspicionScorer
+		? m_SuspicionScorer->GetBanReasonTags(steamId)
+		: std::string("detect");
+	AdminBridge_DiscordNotify(steamId, playerName, 0.0f, map, true, detectReason.c_str());
+	return true;
+}
+
+int AntiCheatCore::RequestDiscordWebhookResendFromBansFile()
+{
+
+	std::string gameDir;
+	if (g_pEngine)
+	{
+		CBufferStringN<512> gd;
+		g_pEngine->GetGameDir(gd);
+		if (gd.Get() && gd.Get()[0])
+			gameDir = gd.Get();
+	}
+	for (char& c : gameDir)
+	{
+		if (c == '\\')
+			c = '/';
+	}
+
+	std::vector<std::string> candidates;
+	if (!gameDir.empty())
+	{
+		candidates.push_back(gameDir + "/addons/counterstrikesharp/configs/plugins/AdminPlugin/banned_steamids.json");
+		candidates.push_back(gameDir + "/csgo/addons/counterstrikesharp/configs/plugins/AdminPlugin/banned_steamids.json");
+	}
+	candidates.push_back("addons/counterstrikesharp/configs/plugins/AdminPlugin/banned_steamids.json");
+
+	std::string json;
+	std::string used;
+	for (const std::string& path : candidates)
+	{
+		std::ifstream f(path);
+		if (!f)
+			continue;
+		std::ostringstream ss;
+		ss << f.rdbuf();
+		json = ss.str();
+		used = path;
+		break;
+	}
+
+	if (used.empty())
+	{
+		AC_Log("ac_webhook_resend_all: banned_steamids.json not found");
+		return 0;
+	}
+
+	auto JsonGetStringField = [](const std::string& obj, const char* key) -> std::string
+	{
+		std::string needle = std::string("\"") + key + "\"";
+		size_t k = obj.find(needle);
+		if (k == std::string::npos)
+			return {};
+		size_t colon = obj.find(':', k + needle.size());
+		if (colon == std::string::npos)
+			return {};
+		size_t q1 = obj.find('"', colon + 1);
+		if (q1 == std::string::npos)
+			return {};
+		size_t q2 = q1 + 1;
+		std::string out;
+		while (q2 < obj.size() && obj[q2] != '"')
+		{
+			if (obj[q2] == '\\' && q2 + 1 < obj.size())
+			{
+				out.push_back(obj[q2 + 1]);
+				q2 += 2;
+				continue;
+			}
+			out.push_back(obj[q2++]);
+		}
+		return out;
+	};
+
+	auto TrimAscii = [](std::string s) -> std::string
+	{
+		while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+			s.erase(s.begin());
+		while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+			s.pop_back();
+		return s;
+	};
+
+	auto EqualsIgnoreCaseAscii = [](const std::string& a, const std::string& b) -> bool
+	{
+		if (a.size() != b.size())
+			return false;
+		for (size_t i = 0; i < a.size(); ++i)
+		{
+			unsigned char ca = static_cast<unsigned char>(a[i]);
+			unsigned char cb = static_cast<unsigned char>(b[i]);
+			if (ca >= 'A' && ca <= 'Z')
+				ca = static_cast<unsigned char>(ca - 'A' + 'a');
+			if (cb >= 'A' && cb <= 'Z')
+				cb = static_cast<unsigned char>(cb - 'A' + 'a');
+			if (ca != cb)
+				return false;
+		}
+		return true;
+	};
+
+	auto IsAnticheatAdminName = [&](const std::string& raw) -> bool
+	{
+		const std::string admin = TrimAscii(raw);
+		if (admin.empty())
+			return false;
+		// Exact labels used historically / in AdminPlugin.
+		if (admin == "Античит система")
+			return true;
+		if (EqualsIgnoreCaseAscii(admin, "Anti-Cheat System"))
+			return true;
+		if (EqualsIgnoreCaseAscii(admin, "anticheat"))
+			return true;
+		return false;
+	};
+
+	int queued = 0;
+	size_t pos = 0;
+	while (pos < json.size())
+	{
+		size_t objStart = json.find('{', pos);
+		if (objStart == std::string::npos)
+			break;
+		size_t objEnd = json.find('}', objStart);
+		if (objEnd == std::string::npos)
+			break;
+		std::string obj = json.substr(objStart, objEnd - objStart + 1);
+		pos = objEnd + 1;
+
+		std::string adminName = JsonGetStringField(obj, "AdminName");
+		if (adminName.empty())
+			adminName = JsonGetStringField(obj, "adminName");
+		if (adminName.empty())
+			adminName = JsonGetStringField(obj, "admin");
+		if (!IsAnticheatAdminName(adminName))
+			continue;
+
+		std::string sidStr = JsonGetStringField(obj, "steamId64");
+		if (sidStr.empty())
+			sidStr = JsonGetStringField(obj, "SteamId64");
+		uint64_t sid = sidStr.empty() ? 0 : std::strtoull(sidStr.c_str(), nullptr, 10);
+		if (sid == 0)
+			continue;
+
+		std::string nick = JsonGetStringField(obj, "name");
+		if (nick.empty())
+			nick = "?";
+
+		std::string fileReason = JsonGetStringField(obj, "reason");
+		if (fileReason.empty())
+			fileReason = JsonGetStringField(obj, "Reason");
+		const char* reasonArg = fileReason.empty() ? nullptr : fileReason.c_str();
+		AdminBridge_DiscordNotify(sid, nick.c_str(), 0.0f, "resend", true, reasonArg);
+		++queued;
+	}
+
+	AC_Log("ac_webhook_resend_all: file=%s queued=%d via AdminPlugin→backend (AdminName Anti-Cheat System|Античит система|anticheat)",
+		used.c_str(), queued);
+	return queued;
 }
 
 std::string AntiCheatCore::GetClientIpForSlot(int slot)
@@ -721,28 +916,19 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 		profile->actionTakenBan = true;
 		profile->isBanned = true;
 		m_SuspicionScorer->MarkBanned(profile->steamId);
-		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str());
-
-		if (m_DiscordWebhook && m_DiscordWebhook->IsEnabled())
+		const float banScore = m_SuspicionScorer->GetScore(profile->steamId);
+		const std::string detectReason = m_SuspicionScorer->GetBanReasonTags(profile->steamId);
+		const char* mapName = nullptr;
+		if (CGlobalVars* gv = GetGlobals())
 		{
-			DiscordBanNotify n;
-			n.steamId = profile->steamId;
-			n.playerName = profile->name;
-			n.reason = m_Config.ban_reason;
-			n.durationDays = m_Config.ban_duration_days;
-			n.suspicionScore = m_SuspicionScorer->GetScore(profile->steamId);
-			n.decayPerSecond = m_SuspicionScorer->GetDecayPerSecond();
-			if (CGlobalVars* gv = GetGlobals())
-			{
-				const char* map = STRING(gv->mapname);
-				if (map && map[0])
-					n.mapName = map;
-			}
-			m_DiscordWebhook->NotifyBan(n);
+			const char* map = STRING(gv->mapname);
+			if (map && map[0])
+				mapName = map;
 		}
+		// Discord: AdminPlugin Bearer → backend /api/cs2/anticheat/ban-notify (no local curl).
+		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str(), banScore, mapName, detectReason.c_str());
 
-		AC_Log("auto-ban steam=%llu name=%s score=%.1f (continued after admin warn)",
-			(unsigned long long)profile->steamId, profile->name.c_str(),
-			m_SuspicionScorer->GetScore(profile->steamId));
+		AC_Log("auto-ban steam=%llu name=%s score=%.1f reason=%s (discord via AdminPlugin→backend)",
+			(unsigned long long)profile->steamId, profile->name.c_str(), banScore, detectReason.c_str());
 	}
 }

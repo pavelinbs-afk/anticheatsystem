@@ -8,6 +8,7 @@
 #include <icvar.h>
 #include <ctime>
 #include <cstdio>
+#include <cstdlib>
 
 #ifndef AC_GIT_COMMIT
 #define AC_GIT_COMMIT "unknown"
@@ -104,4 +105,57 @@ CON_COMMAND_F(ac_debug, "ac_debug <0|1> — toggle verbose anticheat debug log",
 	const bool on = (v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y'));
 	AC_SetDebugLog(on);
 	Msg("[anticheat] debug_log=%s\n", on ? "ON" : "OFF");
+}
+
+CON_COMMAND_F(ac_webhook_test, "Send a test Discord ban embed via configured webhook", FCVAR_RELEASE | FCVAR_GAMEDLL)
+{
+	(void)context;
+	(void)args;
+	if (AntiCheatCore* core = AntiCheatCore::GetInstance())
+	{
+		core->RequestDiscordWebhookTest();
+		Msg("[anticheat] webhook test queued via AdminPlugin → backend — check Discord / AdminPlugin logs\n");
+	}
+	else
+	{
+		Msg("[anticheat] core not ready\n");
+	}
+}
+
+CON_COMMAND_F(ac_webhook_resend, "ac_webhook_resend <steamid64> [name] — re-send ban embed for one player", FCVAR_RELEASE | FCVAR_GAMEDLL)
+{
+	(void)context;
+	if (args.ArgC() < 2)
+	{
+		Msg("Usage: ac_webhook_resend <steamid64> [player_name]\n");
+		Msg("       ac_webhook_resend_all  — bans with AdminName Anti-Cheat System|Античит система|anticheat\n");
+		return;
+	}
+
+	const uint64_t sid = std::strtoull(args.Arg(1), nullptr, 10);
+	const char* name = (args.ArgC() >= 3) ? args.Arg(2) : "?";
+	if (AntiCheatCore* core = AntiCheatCore::GetInstance())
+	{
+		if (core->RequestDiscordWebhookResend(sid, name))
+			Msg("[anticheat] webhook resend queued steam=%llu name=%s via AdminPlugin → backend\n",
+				(unsigned long long)sid, name);
+		else
+			Msg("[anticheat] webhook resend failed (bad steamid)\n");
+	}
+}
+
+CON_COMMAND_F(ac_webhook_resend_all, "Re-send Discord embeds for anticheat bans from banned_steamids.json", FCVAR_RELEASE | FCVAR_GAMEDLL)
+{
+	(void)context;
+	(void)args;
+	if (AntiCheatCore* core = AntiCheatCore::GetInstance())
+	{
+		const int n = core->RequestDiscordWebhookResendFromBansFile();
+		Msg("[anticheat] webhook resend_all queued=%d (AdminName: Anti-Cheat System | Античит система | anticheat)\n", n);
+		Msg("[anticheat] notify goes via AdminPlugin → backend; watch AdminPlugin / backend logs + Discord\n");
+	}
+	else
+	{
+		Msg("[anticheat] core not ready\n");
+	}
 }

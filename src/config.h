@@ -15,13 +15,16 @@ struct AntiCheatConfig {
 	float monitor_threshold = 15.0f;
 	float warn_threshold = 25.0f;
 	float report_threshold = 35.0f;
-	float admin_warn_threshold = 50.0f; // HTML warn to admins; ban waits for ban_threshold
-	float ban_threshold = 55.0f;
+	float admin_warn_threshold = 50.0f; // HTML warn to admins
+	float ban_threshold = 55.0f;        // ban after warn + continued detections
+	float fast_ban_threshold = 60.0f;   // after warn, reach this within fast_ban_window_sec → ban
+	float fast_ban_window_sec = 60.0f;
 
 	int ban_duration_days = 45;
 	std::string ban_reason = "Использование читов (Античит система)";
 	int ban_countdown_seconds = 10;
-	std::string discord_webhook_url = ""; // Discord embed on auto-ban (empty = off)
+	// Legacy local Discord URL (unused for auto-ban). Discord goes via AdminPlugin → backend.
+	std::string discord_webhook_url = "";
 
 	// Verbose console spam (staff reload, file scan ok, score ticks, shot traces).
 	// Important events (ban/report/warn/critical) always use AC_Log / AC_LogCritical.
@@ -65,4 +68,6 @@ struct AntiCheatConfig {
 	std::string backend_api_token = ""; // Bearer = CS2_FREEZE_SERVICE_TOKEN / CS_PLUGIN_SECRET
 
 	static AntiCheatConfig LoadFromFile(const std::string& filepath);
+	/// Writes addons/anticheat/configs/anticheat_status.json (version for AdminPlugin Discord footer).
+	static void WriteStatusFile(const char* version);
 };

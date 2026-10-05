@@ -27,15 +27,17 @@ bash build_cmake.sh
 | 25+ | warn в лог |
 | **35+** | **репорт** в модерацию (`css_anticheat_auto_report`) — **без кика** |
 | **50+** | **HTML-предупреждение админам** (не бан) |
-| **55+** | после admin-warn, если очки **продолжают расти** → **бан 45 дней** + Discord embed |
+| **55+** | после admin-warn, если очки **продолжают расти** → бан |
+| **60 за &lt;1 мин** после 50 | **быстрый бан** (даже одним скачком 50→60) + Discord |
 
 Очки подозрительности **никогда не показываются** игроку.
 
-Отложенного бана (5–20 мин) нет. Репорт на 35 не банит; на 50 — warn админам; автобан только с **55+** при продолжающихся детектах.
+Отложенного бана (5–20 мин) нет. Репорт на 35 не банит; на 50 — warn админам. Автобан: **55+** при продолжающихся детектах, или **60 в течение минуты** после 50.
 
 ## Интеграция
 
-- Бан → тот же `banned_steamids.json` + POST `/api/cs2/sanctions`, что и админка.
+- Бан → `css_anticheat_apply_ban` → AdminPlugin (`banned_steamids.json` + POST `/api/cs2/sanctions` с `source=anticheat`).
+- Discord → AdminPlugin Bearer POST `/api/cs2/anticheat/ban-notify` → backend шлёт webhook (`CS2_ANTICHEAT_DISCORD_WEBHOOK_URL`). На game-хосте curl не нужен.
 - Репорт → тот же ticket ingest, что `!report` (source `cs2_anticheat`).
 
 ## Конфиг
@@ -60,6 +62,8 @@ bash build_cmake.sh
     "report_threshold": 35,
     "admin_warn_threshold": 50,
     "ban_threshold": 55,
+    "fast_ban_threshold": 60,
+    "fast_ban_window_sec": 60,
     "score_decay_per_minute": 1.2
   },
   "ban": {
@@ -69,7 +73,7 @@ bash build_cmake.sh
   },
   "notes": {
     "reports": "35+ -> css_anticheat_auto_report (PlaytimeReporter ticket API)",
-    "bans": "55+ after admin warn -> css_anticheat_apply_ban"
+    "bans": "55+ continued after warn, or 60 within 60s after 50 -> css_anticheat_apply_ban"
   }
 }
 ```
