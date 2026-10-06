@@ -9,6 +9,7 @@
 #include <ctime>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 
 #ifndef AC_GIT_COMMIT
 #define AC_GIT_COMMIT "unknown"
@@ -158,4 +159,38 @@ CON_COMMAND_F(ac_webhook_resend_all, "Re-send Discord embeds for anticheat bans 
 	{
 		Msg("[anticheat] core not ready\n");
 	}
+}
+
+static void AcApplyAdminCheckHoldFromArgs(const CCommand& args, const char* usageName)
+{
+	if (args.ArgC() < 2)
+	{
+		Msg("[anticheat] usage: %s <steamid64>\n", usageName);
+		return;
+	}
+	const uint64_t sid = strtoull(args.Arg(1), nullptr, 10);
+	if (sid == 0)
+	{
+		Msg("[anticheat] %s: invalid steamid64\n", usageName);
+		return;
+	}
+	if (AntiCheatCore* core = AntiCheatCore::GetInstance())
+	{
+		core->SetAdminCheckHold(sid, true);
+		Msg("[anticheat] admin cheat-check hold on %llu\n", static_cast<unsigned long long>(sid));
+	}
+	else
+		Msg("[anticheat] core not ready\n");
+}
+
+CON_COMMAND_F(ac_admin_check, "AdminPlugin: hold anticheat autoban (player on cheat-check)", FCVAR_RELEASE | FCVAR_GAMEDLL)
+{
+	(void)context;
+	AcApplyAdminCheckHoldFromArgs(args, "ac_admin_check");
+}
+
+CON_COMMAND_F(cheat, "AdminPlugin: hold anticheat autoban (alias of ac_admin_check)", FCVAR_RELEASE | FCVAR_GAMEDLL)
+{
+	(void)context;
+	AcApplyAdminCheckHoldFromArgs(args, "cheat");
 }

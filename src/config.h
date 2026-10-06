@@ -12,12 +12,13 @@ struct AntiCheatConfig {
 	float speed_threshold = 520.0f;
 	bool enable_bhop_detection = false;
 
-	float monitor_threshold = 15.0f;
-	float warn_threshold = 25.0f;
-	float report_threshold = 35.0f;
-	float admin_warn_threshold = 50.0f; // HTML warn to admins
-	float ban_threshold = 55.0f;        // ban after warn + continued detections
-	float fast_ban_threshold = 60.0f;   // after warn, reach this within fast_ban_window_sec → ban
+	// Confidence 0–100 (not a linear point sum). Ban needs 2 channels or heavy rage.
+	float monitor_threshold = 22.0f;
+	float warn_threshold = 34.0f;
+	float report_threshold = 45.0f;
+	float admin_warn_threshold = 56.0f; // HTML warn to admins
+	float ban_threshold = 70.0f;        // after warn + corroboration
+	float fast_ban_threshold = 82.0f;   // after warn, reach this within window + 2 channels
 	float fast_ban_window_sec = 60.0f;
 
 	int ban_duration_days = 45;

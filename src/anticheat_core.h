@@ -50,6 +50,8 @@ public:
 	bool RequestDiscordWebhookResend(uint64_t steamId, const char* playerName);
 	/// Queue embeds for bans issued by «Античит система» from banned_steamids.json.
 	int RequestDiscordWebhookResendFromBansFile();
+	/// Admin started a cheat-check: freeze autoban for this steam (until disconnect).
+	void SetAdminCheckHold(uint64_t steamId, bool hold);
 
 private:
 	AntiCheatCore() = default;

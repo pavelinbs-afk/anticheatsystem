@@ -127,11 +127,10 @@ void AntiCheatCore::PrintStatus() const
 	Msg("  debug_log   : %s\n", AC_IsDebugLogEnabled() ? "ON" : "OFF");
 	Msg("  backend     : %s via AdminPlugin Bearer → /api/cs2/anticheat/check\n",
 		m_Config.enable_backend_check ? "ON" : "OFF");
-	Msg("  thresholds  : monitor=%.0f warn=%.0f report=%.0f admin_warn=%.0f ban=%.0f fast_ban=%.0f/%.0fs decay=%.2f/min\n",
+	Msg("  confidence  : monitor=%.0f warn=%.0f report=%.0f admin_warn=%.0f ban=%.0f fast=%.0f/%.0fs (watch, 2-channel ban)\n",
 		m_Config.monitor_threshold, m_Config.warn_threshold, m_Config.report_threshold,
 		m_Config.admin_warn_threshold, m_Config.ban_threshold,
-		m_Config.fast_ban_threshold, m_Config.fast_ban_window_sec,
-		m_Config.score_decay_per_second * 60.0f);
+		m_Config.fast_ban_threshold, m_Config.fast_ban_window_sec);
 	Msg("  ban         : days=%d reason=\"%s\"\n",
 		m_Config.ban_duration_days, m_Config.ban_reason.c_str());
 	Msg("  modules     : aim=%d wh=%d move=%d stats=%d fps=%d shots=%d combat=%d netsafe=%d server_filescan=%d (client files N/A)\n",
@@ -471,7 +470,11 @@ void AntiCheatCore::OnPlayerDisconnect(int slot, uint64_t steamID)
 	if (slot >= 0 && slot < AC_MAXPLAYERS)
 		m_SlotToSteam[slot] = 0;
 	if (sid)
+	{
+		if (m_SuspicionScorer)
+			m_SuspicionScorer->SetAdminCheckHold(sid, false);
 		m_PlayerProfiles.erase(sid);
+	}
 }
 
 PlayerProfile* AntiCheatCore::GetPlayerBySlot(int slot)
@@ -918,4 +921,23 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 		AC_Log("auto-ban steam=%llu name=%s score=%.1f reason=%s (discord via AdminPlugin→backend)",
 			(unsigned long long)profile->steamId, profile->name.c_str(), banScore, detectReason.c_str());
 	}
+}
+
+void AntiCheatCore::SetAdminCheckHold(uint64_t steamId, bool hold)
+{
+	if (!steamId || !m_SuspicionScorer)
+		return;
+
+	m_SuspicionScorer->SetAdminCheckHold(steamId, hold);
+	if (!hold)
+		return;
+
+	m_SuspicionScorer->RetractIssuedBan(steamId);
+	if (PlayerProfile* p = GetPlayerProfile(steamId))
+	{
+		p->actionTakenBan = false;
+		p->isBanned = false;
+	}
+	AC_Log("admin-check hold ON steam=%llu (autoban paused; fast-ban retracted if queued)",
+		(unsigned long long)steamId);
 }
