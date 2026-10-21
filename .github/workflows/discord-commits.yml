@@ -50,6 +50,21 @@ jobs:
               --arg pusher "${PUSHER}" \
               --arg pusher_url "${PUSHER_URL}" \
               --slurpfile event "${GITHUB_EVENT_PATH}" '
+              def format_when:
+                if . == null or . == "" then "unknown"
+                else
+                  (capture("(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2})T(?<time>[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.[0-9]+)?(?<off>Z|[+-][0-9]{2}:[0-9]{2})?") // null) as $m
+                  | if $m == null then .
+                    else
+                      ($m.date + " " + $m.time) as $base
+                      | if ($m.off // "") == "" or ($m.off // "") == "Z" then
+                          $base + " UTC +0"
+                        else
+                          ($m.off | capture("(?<sign>[+-])(?<h>[0-9]{2})")) as $o
+                          | $base + " UTC " + $o.sign + (($o.h | tonumber) | tostring)
+                        end
+                    end
+                end;
               ($event[0].commits | .[0:10]) as $commits
               | ($commits | length) as $n
               | {
@@ -84,7 +99,7 @@ jobs:
                         + "**Куда**\n"
                         + "`" + $repo + "` → ветка `" + $branch + "`\n\n"
                         + "**Когда**\n"
-                        + (.timestamp // "unknown")
+                        + ((.timestamp // "") | format_when)
                       ),
                       color: 5793266,
                       author: (
