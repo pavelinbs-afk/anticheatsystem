@@ -34,20 +34,20 @@ AntiCheatCore* AntiCheatCore::s_Instance = nullptr;
 AntiCheatCore* AntiCheatCore::GetInstance()
 {
 	if (!s_Instance)
-		s_Instance = new AntiCheatCore();
-	return s_Instance;
+        s_Instance = new AntiCheatCore();
+    return s_Instance;
 }
 
 bool AntiCheatCore::Initialize()
 {
 	m_Config = AntiCheatConfig::LoadFromFile("addons/anticheat/configs/anticheat_config.json");
 
-	m_AimAnalyzer = std::make_unique<AimAnalyzer>();
-	m_WallhackDetector = std::make_unique<WallhackDetector>();
-	m_MovementAnalyzer = std::make_unique<MovementAnalyzer>();
-	m_StatisticsTracker = std::make_unique<StatisticsTracker>();
-	m_IntegrityChecker = std::make_unique<IntegrityChecker>();
-	m_SuspicionScorer = std::make_unique<SuspicionScorer>();
+    m_AimAnalyzer = std::make_unique<AimAnalyzer>();
+    m_WallhackDetector = std::make_unique<WallhackDetector>();
+    m_MovementAnalyzer = std::make_unique<MovementAnalyzer>();
+    m_StatisticsTracker = std::make_unique<StatisticsTracker>();
+    m_IntegrityChecker = std::make_unique<IntegrityChecker>();
+    m_SuspicionScorer = std::make_unique<SuspicionScorer>();
 	m_FpsDropDetector = std::make_unique<FpsDropDetector>();
 	m_GameFileScanner = std::make_unique<GameFileScanner>();
 	m_ShotTracker = std::make_unique<ShotTracker>();
@@ -184,7 +184,7 @@ bool AntiCheatCore::RequestDiscordWebhookResend(uint64_t steamId, const char* pl
 		? m_SuspicionScorer->GetBanReasonTags(steamId)
 		: std::string("detect");
 	AdminBridge_DiscordNotify(steamId, playerName, 0.0f, map, true, detectReason.c_str());
-	return true;
+    return true;
 }
 
 int AntiCheatCore::RequestDiscordWebhookResendFromBansFile()
@@ -429,12 +429,12 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 	if (slot < 0 || slot >= AC_MAXPLAYERS || steamID == 0)
 		return;
 
-	auto profile = std::make_shared<PlayerProfile>();
-	profile->steamId = steamID;
+    auto profile = std::make_shared<PlayerProfile>();
+    profile->steamId = steamID;
 	profile->slot = slot;
 	profile->name = name ? name : "";
-	profile->connectionTime = std::chrono::steady_clock::now();
-	profile->lastActivityTime = profile->connectionTime;
+    profile->connectionTime = std::chrono::steady_clock::now();
+    profile->lastActivityTime = profile->connectionTime;
 	profile->ipAddress = GetClientIpForSlot(slot);
 
 	CGlobalVars* gv = GetGlobals();
@@ -451,7 +451,7 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 			(unsigned long long)steamID);
 	}
 
-	m_PlayerProfiles[steamID] = profile;
+    m_PlayerProfiles[steamID] = profile;
 	m_SlotToSteam[slot] = steamID;
 
 	if (IsStaffExempt(steamID))
@@ -499,7 +499,7 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 		attacker = nullptr;
 	if (attacker && victim && attacker->steamId != victim->steamId)
 	{
-		attacker->kills++;
+        attacker->kills++;
 		attacker->killsThisRound++;
 		if (headshot)
 			attacker->headshots++;
@@ -547,7 +547,7 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 	}
 	if (victim)
 	{
-		victim->deaths++;
+        victim->deaths++;
 		CGlobalVars* gv = GetGlobals();
 		victim->movementIgnoreUntil = (gv ? gv->curtime : 0.0f) + 3.0f;
 		victim->samplesValid = false;
@@ -564,7 +564,7 @@ void AntiCheatCore::OnPlayerHurt(int attackerSlot, int victimSlot, float damage,
 	if (IsStaffExempt(attacker->steamId))
 		return;
 
-	attacker->totalDamage += damage;
+        attacker->totalDamage += damage;
 	attacker->shotsHit++;
 
 	// Fresh sample at event time — GameFrame angles can be a tick stale.
@@ -799,8 +799,8 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 	CGlobalVars* gv = GetGlobals();
 	const float curtime = gv ? gv->curtime : 0.0f;
 
-	float scoreDelta = 0.0f;
-
+    float scoreDelta = 0.0f;
+    
 	if (g_pEngine && m_Config.enable_network_safety && m_NetworkSafety)
 	{
 		INetChannelInfo* net = g_pEngine->GetPlayerNetInfo(CPlayerSlot(profile->slot));
@@ -814,14 +814,14 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 
 	if (m_Config.enable_aim_detection && alive && team >= 2)
 	{
-		scoreDelta = m_AimAnalyzer->Analyze(*profile, 0.015f);
+        scoreDelta = m_AimAnalyzer->Analyze(*profile, 0.015f);
 		if (scoreDelta > 0.0f)
 			AddSoftScore(profile->steamId, "AimAnalyzer", scoreDelta, "Aim anomaly", profile);
-	}
-
+    }
+    
 	if (m_Config.enable_wallhack_detection && alive && team >= 2)
 	{
-		scoreDelta = m_WallhackDetector->Analyze(*profile, enemies);
+        scoreDelta = m_WallhackDetector->Analyze(*profile, enemies);
 		if (scoreDelta > 0.0f)
 			AddSoftScore(profile->steamId, "WallhackDetector", scoreDelta, "Wall track", profile);
 	}
@@ -850,16 +850,16 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 
 	if (m_Config.enable_stats_tracking)
 	{
-		scoreDelta = m_StatisticsTracker->AnalyzeSession(*profile);
+        scoreDelta = m_StatisticsTracker->AnalyzeSession(*profile);
 		if (scoreDelta > 0.0f)
 			m_SuspicionScorer->AddScore(profile->steamId, "StatisticsTracker", scoreDelta, "High statistics");
-	}
-
-	scoreDelta = m_IntegrityChecker->CheckIntegrity(*profile);
+    }
+    
+    scoreDelta = m_IntegrityChecker->CheckIntegrity(*profile);
 	if (scoreDelta > 0.0f)
 		m_SuspicionScorer->AddScore(profile->steamId, "IntegrityChecker", scoreDelta, "Integrity");
 
-	CheckAndApplyActions(profile);
+    CheckAndApplyActions(profile);
 }
 
 void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
@@ -871,7 +871,7 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 
 	// Local MarkBanned = already issued ApplyBan this uptime → never call it again.
 	if (m_SuspicionScorer->IsAlreadyBanned(profile->steamId))
-		return;
+        return; 
 
 	ScorerAction action = m_SuspicionScorer->EvaluatePlayer(*profile);
 
@@ -904,7 +904,7 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 	if (action == ScorerAction::BAN && !profile->actionTakenBan)
 	{
 		profile->actionTakenBan = true;
-		profile->isBanned = true;
+        profile->isBanned = true;
 		m_SuspicionScorer->MarkBanned(profile->steamId);
 		const float banScore = m_SuspicionScorer->GetScore(profile->steamId);
 		const std::string detectReason = m_SuspicionScorer->GetBanReasonTags(profile->steamId);

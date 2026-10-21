@@ -1,0 +1,80 @@
+name: Discord commits
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post commits to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          COMPARE_URL: ${{ github.event.compare }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "Secret DISCORD_WEBHOOK is not set."
+            echo "GitHub → Settings → Secrets and variables → Actions → New repository secret"
+            echo "Name: DISCORD_WEBHOOK  Value: Discord webhook URL"
+            exit 1
+          fi
+
+          if ! jq -e '.commits | type == "array" and length > 0' "${GITHUB_EVENT_PATH}" >/dev/null; then
+            echo "No commits in push payload — skip."
+            exit 0
+          fi
+
+          COUNT="$(jq '.commits | length' "${GITHUB_EVENT_PATH}")"
+          TITLE="📦 ${COUNT} commit$( [ "${COUNT}" = "1" ] || echo s ) → \`${BRANCH_NAME}\`"
+
+          DESCRIPTION="$(
+            jq -r '
+              .commits
+              | map(
+                  "`" + (.id[0:7]) + "` "
+                  + ((.message | split("\n")[0])[0:100])
+                  + " — " + .author.name
+                )
+              | join("\n")
+            ' "${GITHUB_EVENT_PATH}"
+          )"
+
+          # Discord embed description limit
+          DESCRIPTION="$(printf '%s' "${DESCRIPTION}" | head -c 3900)"
+
+          PAYLOAD="$(jq -nc \
+            --arg title "${TITLE}" \
+            --arg desc "${DESCRIPTION}" \
+            --arg url "${COMPARE_URL}" \
+            --arg footer "${REPO}" \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              username: "GitHub",
+              embeds: [{
+                title: $title,
+                description: $desc,
+                url: (if $url == "" then null else $url end),
+                color: 5793266,
+                footer: { text: $footer },
+                timestamp: $ts
+              }]
+            }'
+          )"
+
+          curl --fail-with-body -sS \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" \
+            "${DISCORD_WEBHOOK}"
+
+          echo
+          echo "Discord notify OK (${COUNT} commit(s) on ${BRANCH_NAME})."
