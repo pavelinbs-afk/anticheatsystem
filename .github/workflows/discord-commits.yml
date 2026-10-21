@@ -68,8 +68,6 @@ jobs:
               ($event[0].commits | .[0:10]) as $commits
               | ($commits | length) as $n
               | {
-                  username: "Anti-Cheat Updates",
-                  avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
                   content: (
                     "**Новый пуш** в [`" + $repo + "`](" + $repo_url + ")\n"
                     + "Ветка: `" + $branch + "` · Автор пуша: [" + $pusher + "](" + $pusher_url + ")"
