@@ -18,7 +18,11 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           BRANCH_NAME: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           COMPARE_URL: ${{ github.event.compare }}
+          PUSHER: ${{ github.actor }}
+          PUSHER_URL: ${{ github.server_url }}/${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -35,40 +39,71 @@ jobs:
           fi
 
           COUNT="$(jq '.commits | length' "${GITHUB_EVENT_PATH}")"
-          TITLE="📦 ${COUNT} commit$( [ "${COUNT}" = "1" ] || echo s ) → \`${BRANCH_NAME}\`"
 
-          DESCRIPTION="$(
-            jq -r '
-              .commits
-              | map(
-                  "`" + (.id[0:7]) + "` "
-                  + ((.message | split("\n")[0])[0:100])
-                  + " — " + .author.name
-                )
-              | join("\n")
-            ' "${GITHUB_EVENT_PATH}"
-          )"
-
-          # Discord embed description limit
-          DESCRIPTION="$(printf '%s' "${DESCRIPTION}" | head -c 3900)"
-
-          PAYLOAD="$(jq -nc \
-            --arg title "${TITLE}" \
-            --arg desc "${DESCRIPTION}" \
-            --arg url "${COMPARE_URL}" \
-            --arg footer "${REPO}" \
-            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{
-              username: "GitHub",
-              embeds: [{
-                title: $title,
-                description: $desc,
-                url: (if $url == "" then null else $url end),
-                color: 5793266,
-                footer: { text: $footer },
-                timestamp: $ts
-              }]
-            }'
+          # Один embed на коммит (макс. 10 на сообщение Discord).
+          PAYLOAD="$(
+            jq -nc \
+              --arg branch "${BRANCH_NAME}" \
+              --arg repo "${REPO}" \
+              --arg repo_url "${REPO_URL}" \
+              --arg compare "${COMPARE_URL}" \
+              --arg pusher "${PUSHER}" \
+              --arg pusher_url "${PUSHER_URL}" \
+              --slurpfile event "${GITHUB_EVENT_PATH}" '
+              ($event[0].commits | .[0:10]) as $commits
+              | ($commits | length) as $n
+              | {
+                  username: "Anti-Cheat Updates",
+                  avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                  content: (
+                    "**Новый пуш** в [`" + $repo + "`](" + $repo_url + ")\n"
+                    + "Ветка: `" + $branch + "` · Автор пуша: [" + $pusher + "](" + $pusher_url + ")"
+                    + (if $compare != "" then " · [Сравнить изменения](" + $compare + ")" else "" end)
+                    + (if ($event[0].commits | length) > 10
+                       then "\n_Показаны первые 10 из " + (($event[0].commits | length) | tostring) + " коммитов._"
+                       else "" end)
+                  ),
+                  embeds: [
+                    $commits[] | {
+                      title: (
+                        ((.message | split("\n")[0])[0:200])
+                        | if length == 0 then "(без сообщения)" else . end
+                      ),
+                      url: .url,
+                      description: (
+                        (
+                          (.message | split("\n")[1:] | map(select(length > 0)) | join("\n"))
+                          | if length > 0 then .[0:800] + "\n\n" else "" end
+                        )
+                        + "**Коммит**\n"
+                        + "`" + .id[0:7] + "` · [открыть на GitHub](" + .url + ")\n\n"
+                        + "**Кто**\n"
+                        + .author.name
+                        + (if (.author.username // "") != "" then " (`" + .author.username + "`)" else "" end)
+                        + "\n\n"
+                        + "**Куда**\n"
+                        + "`" + $repo + "` → ветка `" + $branch + "`\n\n"
+                        + "**Когда**\n"
+                        + (.timestamp // "unknown")
+                      ),
+                      color: 5793266,
+                      author: (
+                        { name: .author.name }
+                        + (
+                          if (.author.username // "") != "" then {
+                            url: ("https://github.com/" + .author.username),
+                            icon_url: ("https://github.com/" + .author.username + ".png?size=64")
+                          } else {} end
+                        )
+                      ),
+                      footer: {
+                        text: ($repo + " · " + $branch + " · " + .id[0:7])
+                      },
+                      timestamp: (.timestamp // null)
+                    }
+                  ]
+                }
+              '
           )"
 
           curl --fail-with-body -sS \
