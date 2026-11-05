@@ -14,8 +14,6 @@ enum class BridgeKind : uint8_t
 	Ban,
 	Report,
 	Warn,
-	BackendCheck,
-	DiscordNotify,
 };
 
 struct PendingBridge
@@ -23,11 +21,9 @@ struct PendingBridge
 	BridgeKind kind = BridgeKind::Report;
 	uint64_t steamId = 0;
 	char name[96]{};
-	char ip[64]{};
 	char map[96]{};
 	char reason[96]{};
 	float score = 0.0f;
-	bool resend = false;
 	int attemptsLeft = 0;
 	float nextAt = 0.0f;
 };
@@ -120,31 +116,6 @@ void DispatchOne(const PendingBridge& p)
 				(unsigned long long)p.steamId, scoreBuf);
 		AC_Log("bridge admin-warn -> %s", cmd);
 		break;
-	case BridgeKind::BackendCheck:
-		if (p.name[0] && p.ip[0])
-			std::snprintf(cmd, sizeof(cmd), "css_anticheat_backend_check %llu \"%s\" \"%s\"\n",
-				(unsigned long long)p.steamId, p.ip, p.name);
-		else if (p.ip[0])
-			std::snprintf(cmd, sizeof(cmd), "css_anticheat_backend_check %llu \"%s\"\n",
-				(unsigned long long)p.steamId, p.ip);
-		else
-			std::snprintf(cmd, sizeof(cmd), "css_anticheat_backend_check %llu\n",
-				(unsigned long long)p.steamId);
-		AC_Log("bridge backend-check -> %s", cmd);
-		break;
-	case BridgeKind::DiscordNotify:
-	{
-		const char* mapArg = p.map;
-		const char* reason = p.reason[0] ? p.reason : "detect";
-		if (p.name[0])
-			std::snprintf(cmd, sizeof(cmd), "css_anticheat_discord_notify %llu \"%s\" %s \"%s\" %d \"%s\" \"%s\"\n",
-				(unsigned long long)p.steamId, p.name, scoreBuf, mapArg, p.resend ? 1 : 0, reason, ver);
-		else
-			std::snprintf(cmd, sizeof(cmd), "css_anticheat_discord_notify %llu %s \"%s\" %d \"%s\" \"%s\"\n",
-				(unsigned long long)p.steamId, scoreBuf, mapArg, p.resend ? 1 : 0, reason, ver);
-		AC_Log("bridge discord-notify -> %s", cmd);
-		break;
-	}
 	default:
 		return;
 	}
@@ -237,50 +208,6 @@ void AdminBridge_WarnAdmins(uint64_t steamId, const char* playerName, float scor
 	p.kind = BridgeKind::Warn;
 	p.steamId = steamId;
 	p.score = score;
-	EscapeForCommand(playerName, p.name, sizeof(p.name));
-	CGlobalVars* gv = GetGlobals();
-	Enqueue(p, gv ? gv->curtime : 0.0f, kDefaultRetries);
-}
-
-void AdminBridge_DiscordNotify(uint64_t steamId, const char* playerName, float suspicionScore, const char* mapName, bool resend, const char* detectReason)
-{
-	PendingBridge p;
-	p.kind = BridgeKind::DiscordNotify;
-	p.steamId = steamId;
-	p.score = suspicionScore;
-	p.resend = resend;
-	EscapeForCommand(playerName, p.name, sizeof(p.name));
-	EscapeForCommand(mapName, p.map, sizeof(p.map));
-	if (!p.map[0] || (p.map[0] == '?' && !p.map[1]))
-	{
-		char resolved[96]{};
-		AC_ResolveMapName(resolved, sizeof(resolved));
-		EscapeForCommand(resolved, p.map, sizeof(p.map));
-	}
-	EscapeForCommand(detectReason, p.reason, sizeof(p.reason));
-	if (!p.reason[0])
-		std::snprintf(p.reason, sizeof(p.reason), "detect");
-	CGlobalVars* gv = GetGlobals();
-	// Discord notify: one retry is enough (resend path is manual).
-	Enqueue(p, gv ? gv->curtime : 0.0f, 1);
-}
-
-void AdminBridge_DiscordTest()
-{
-	if (!g_pEngine)
-		return;
-	char cmd[160];
-	std::snprintf(cmd, sizeof(cmd), "css_anticheat_discord_test \"%s\"\n", PluginVersion());
-	AC_Log("bridge discord-test -> %s", cmd);
-	g_pEngine->ServerCommand(cmd);
-}
-
-void AdminBridge_BackendCheck(uint64_t steamId, const char* clientIp, const char* playerName)
-{
-	PendingBridge p;
-	p.kind = BridgeKind::BackendCheck;
-	p.steamId = steamId;
-	EscapeForCommand(clientIp, p.ip, sizeof(p.ip));
 	EscapeForCommand(playerName, p.name, sizeof(p.name));
 	CGlobalVars* gv = GetGlobals();
 	Enqueue(p, gv ? gv->curtime : 0.0f, kDefaultRetries);

@@ -1,6 +1,6 @@
 # anticheat (CS2 MetaMod)
 
-Серверный античит для CS2. Детекция в C++ (MetaMod), баны и репорты — через те же каналы, что AdminPlugin / PlaytimeReporter.
+Серверный античит для CS2 (MetaMod / KHook). Детекция в C++, баны, репорты и warn админам — через ServerCommand-мост в AdminPlugin / PlaytimeReporter. Проверка бана/IP на бэкенде — локальным curl.
 
 ## Сборка (WSL / Linux)
 
@@ -28,18 +28,18 @@ bash build_cmake.sh
 | **35+** | **репорт** в модерацию (`css_anticheat_auto_report`) — **без кика** |
 | **50+** | **HTML-предупреждение админам** (не бан) |
 | **55+** | после admin-warn, если очки **продолжают расти** → бан |
-| **60 за &lt;1 мин** после 50 | **быстрый бан** (даже одним скачком 50→60) + Discord |
+| **82 за <1 мин** после warn (`fast_ban_threshold` / `fast_ban_window_sec`) | **быстрый бан** (при 2+ каналах детекта) |
 
 Очки подозрительности **никогда не показываются** игроку.
 
-Отложенного бана (5–20 мин) нет. Репорт на 35 не банит; на 50 — warn админам. Автобан: **55+** при продолжающихся детектах, или **60 в течение минуты** после 50.
+Отложенного бана (5–20 мин) нет. Репорт на 35 не банит; на 50 — warn админам. Автобан: **55+** при продолжающихся детектах, или **fast-ban** (`fast_ban_threshold`, по умолчанию 82) в течение `fast_ban_window_sec` после warn.
 
 ## Интеграция
 
 - Бан → `css_anticheat_apply_ban` → AdminPlugin (`banned_steamids.json` + POST `/api/cs2/sanctions` с `source=anticheat`).
-- Discord → AdminPlugin Bearer POST `/api/cs2/anticheat/ban-notify` → backend шлёт webhook (`CS2_ANTICHEAT_DISCORD_WEBHOOK_URL`). На game-хосте curl не нужен.
-- Bypass/IP check → AdminPlugin Bearer GET `/api/cs2/anticheat/check` (не локальный curl).
+- Bypass/IP check → локальный curl (`BackendClient`) GET `/api/cs2/anticheat/check`; `enable_backend_check`, `backend_api_url`, `backend_api_token` (Bearer = `CS2_FREEZE_SERVICE_TOKEN` / `CS_PLUGIN_SECRET`). Активный бан на бэкенде → кик, IP-связь с баном → только репорт.
 - Репорт → тот же ticket ingest, что `!report` (source `cs2_anticheat`).
+- Консоль: `ac_status` — версия, git-сборка, интерфейсы, модули, backend, пороги. Подробный лог: `logging.enable_debug_log` в конфиге.
 - **Anti-WH / Fog of War:** полноценный FoW (не слать врага за стеной/в тени, bake геометрии, latency preload) — отдельный MetaMod-класс плагинов вроде CS2FOW: хук `ISource2GameEntities::CheckTransmit` + BVH карты + smoke voxels. В нашем SDK `CCheckTransmitInfo` помечен как incomplete (нет надёжного `dont_transmit`), bake/trace worker нет — в **anticheat** сейчас только **детекция** WH (score), не скрытие позиций. Подключать anti-ESP отдельным плагином, не смешивать с scoring.
 
 ## Конфиг
@@ -64,10 +64,11 @@ bash build_cmake.sh
     "report_threshold": 35,
     "admin_warn_threshold": 50,
     "ban_threshold": 55,
-    "fast_ban_threshold": 60,
+    "fast_ban_threshold": 82,
     "fast_ban_window_sec": 60,
     "score_decay_per_minute": 1.2
   },
+  "backend": { "enable_backend_check": true, "backend_api_url": "https://perfecteam.ru", "backend_api_token": "" },
   "ban": {
     "duration_days": 45,
     "reason": "Использование читов",
@@ -75,7 +76,7 @@ bash build_cmake.sh
   },
   "notes": {
     "reports": "35+ -> css_anticheat_auto_report (PlaytimeReporter ticket API)",
-    "bans": "55+ continued after warn, or 60 within 60s after 50 -> css_anticheat_apply_ban"
+    "bans": "55+ continued after warn, or fast-ban 82 within 60s after warn -> css_anticheat_apply_ban"
   }
 }
 ```

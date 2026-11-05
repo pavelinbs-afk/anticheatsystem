@@ -212,7 +212,6 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 		if (JsonFindString(json, "backend_api_url", s)) cfg.backend_api_url = s;
 		if (JsonFindString(json, "backend_api_token", s)) cfg.backend_api_token = s;
 		if (JsonFindString(json, "reason", s)) cfg.ban_reason = s;
-		if (JsonFindString(json, "discord_webhook_url", s)) cfg.discord_webhook_url = s;
 	}
 
 	AC_SetDebugLog(cfg.enable_debug_log);
@@ -220,38 +219,4 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 		usedPath.c_str(), cfg.ban_threshold, cfg.report_threshold,
 		cfg.snap_angle_threshold, (int)cfg.enable_backend_check, (int)cfg.enable_debug_log);
 	return cfg;
-}
-
-void AntiCheatConfig::WriteStatusFile(const char* version)
-{
-	const char* ver = (version && version[0]) ? version : "0.0.0";
-
-	std::vector<std::string> candidates;
-	std::string gameDir;
-	if (ResolveGameDir(gameDir))
-	{
-		// Same layout as MetaMod install: <gamedir>/addons/anticheat/configs/
-		candidates.push_back(gameDir + "/addons/anticheat/configs/anticheat_status.json");
-		candidates.push_back(gameDir + "/csgo/addons/anticheat/configs/anticheat_status.json");
-	}
-	candidates.push_back("addons/anticheat/configs/anticheat_status.json");
-	candidates.push_back("csgo/addons/anticheat/configs/anticheat_status.json");
-
-	char body[256];
-	std::snprintf(body, sizeof(body),
-		"{\n  \"version\": \"%s\",\n  \"name\": \"AntiCheat\"\n}\n", ver);
-
-	for (const std::string& path : candidates)
-	{
-		std::ofstream out(path, std::ios::trunc);
-		if (!out)
-			continue;
-		out << body;
-		if (!out.good())
-			continue;
-		AC_Log("status written %s (version=%s)", path.c_str(), ver);
-		return;
-	}
-
-	AC_Log("status write failed (version=%s) — AdminPlugin will use config/fallback", ver);
 }

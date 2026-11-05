@@ -24,9 +24,6 @@ struct AntiCheatConfig {
 	int ban_duration_days = 45;
 	std::string ban_reason = "Использование читов (Античит система)";
 	int ban_countdown_seconds = 10;
-	// Legacy local Discord URL (unused for auto-ban). Discord goes via AdminPlugin → backend.
-	std::string discord_webhook_url = "";
-
 	// Verbose console spam (staff reload, file scan ok, score ticks, shot traces).
 	// Important events (ban/report/warn/critical) always use AC_Log / AC_LogCritical.
 	bool enable_debug_log = false;
@@ -63,12 +60,10 @@ struct AntiCheatConfig {
 	float shot_min_hit_distance = 200.0f;
 	int shot_min_shots_before_score = 3;
 
-	// Bypass/IP check via AdminPlugin Bearer → GET /api/cs2/anticheat/check (not local curl).
+	// Bypass/IP check via local curl → GET /api/cs2/anticheat/check (same logic as site /bypass)
 	bool enable_backend_check = true;
-	std::string backend_api_url = "https://perfecteam.ru"; // legacy unused (AdminPlugin freeze API base)
-	std::string backend_api_token = ""; // legacy unused
+	std::string backend_api_url = "https://perfecteam.ru";
+	std::string backend_api_token = ""; // Bearer = CS2_FREEZE_SERVICE_TOKEN / CS_PLUGIN_SECRET
 
 	static AntiCheatConfig LoadFromFile(const std::string& filepath);
-	/// Writes addons/anticheat/configs/anticheat_status.json (version for AdminPlugin Discord footer).
-	static void WriteStatusFile(const char* version);
 };
