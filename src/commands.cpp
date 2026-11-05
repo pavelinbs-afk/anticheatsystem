@@ -55,13 +55,9 @@ CON_COMMAND_F(ac_status, "AntiCheat status: version, webhook, backend, modules, 
 	char nowBuf[64];
 	FormatLocalNow(nowBuf, sizeof(nowBuf));
 
-	const char* map = "?";
-	if (CGlobalVars* gv = GetGlobals())
-	{
-		const char* m = STRING(gv->mapname);
-		if (m && m[0])
-			map = m;
-	}
+	char mapBuf[96]{};
+	AC_ResolveMapName(mapBuf, sizeof(mapBuf));
+	const char* map = mapBuf[0] ? mapBuf : "?";
 
 	Msg("========== [anticheat] ac_status ==========\n");
 	Msg("  plugin      : %s\n", g_AntiCheatPlugin.GetName());

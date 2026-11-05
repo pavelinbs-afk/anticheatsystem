@@ -24,7 +24,7 @@ public:
 	const char* GetDescription() override	{ return "CS2 server-side anticheat (MetaMod)"; }
 	const char* GetURL() override			{ return ""; }
 	const char* GetLicense() override		{ return "Proprietary"; }
-	const char* GetVersion() override		{ return "1.2.8"; }
+	const char* GetVersion() override		{ return "1.2.9"; }
 	const char* GetDate() override			{ return __DATE__; }
 	const char* GetLogTag() override		{ return "ANTICHEAT"; }
 
@@ -59,6 +59,9 @@ inline CGlobalVars* GetGlobals()
 {
 	return g_pEngine ? g_pEngine->GetServerGlobals() : nullptr;
 }
+
+/// Bare map name for Discord/bridge (no maps/ prefix, no .vpk). Empty if unknown — never "?".
+void AC_ResolveMapName(char* out, size_t outSize);
 
 void AC_Log(const char* fmt, ...);
 void AC_LogDebug(const char* fmt, ...);

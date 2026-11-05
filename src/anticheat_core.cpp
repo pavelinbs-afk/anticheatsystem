@@ -173,18 +173,14 @@ bool AntiCheatCore::RequestDiscordWebhookResend(uint64_t steamId, const char* pl
 		return false;
 	}
 
-	const char* map = "resend";
-	if (CGlobalVars* gv = GetGlobals())
-	{
-		const char* m = STRING(gv->mapname);
-		if (m && m[0])
-			map = m;
-	}
+	char mapBuf[96]{};
+	AC_ResolveMapName(mapBuf, sizeof(mapBuf));
+	const char* map = mapBuf[0] ? mapBuf : "resend";
 	const std::string detectReason = m_SuspicionScorer
 		? m_SuspicionScorer->GetBanReasonTags(steamId)
 		: std::string("detect");
 	AdminBridge_DiscordNotify(steamId, playerName, 0.0f, map, true, detectReason.c_str());
-    return true;
+	return true;
 }
 
 int AntiCheatCore::RequestDiscordWebhookResendFromBansFile()
@@ -908,15 +904,10 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 		m_SuspicionScorer->MarkBanned(profile->steamId);
 		const float banScore = m_SuspicionScorer->GetScore(profile->steamId);
 		const std::string detectReason = m_SuspicionScorer->GetBanReasonTags(profile->steamId);
-		const char* mapName = nullptr;
-		if (CGlobalVars* gv = GetGlobals())
-		{
-			const char* map = STRING(gv->mapname);
-			if (map && map[0])
-				mapName = map;
-		}
+		char mapName[96]{};
+		AC_ResolveMapName(mapName, sizeof(mapName));
 		// Discord: AdminPlugin Bearer → backend /api/cs2/anticheat/ban-notify (no local curl).
-		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str(), banScore, mapName, detectReason.c_str());
+		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str(), banScore, mapName[0] ? mapName : nullptr, detectReason.c_str());
 
 		AC_Log("auto-ban steam=%llu name=%s score=%.1f reason=%s (discord via AdminPlugin→backend)",
 			(unsigned long long)profile->steamId, profile->name.c_str(), banScore, detectReason.c_str());

@@ -90,7 +90,8 @@ void DispatchOne(const PendingBridge& p)
 	{
 	case BridgeKind::Ban:
 	{
-		const char* mapArg = p.map[0] ? p.map : "?";
+		// Empty map → AdminPlugin fills Server.MapName (do not send "?").
+		const char* mapArg = p.map;
 		const char* reason = p.reason[0] ? p.reason : "detect";
 		if (p.name[0])
 			std::snprintf(cmd, sizeof(cmd), "css_anticheat_apply_ban %llu \"%s\" %s \"%s\" \"%s\" \"%s\"\n",
@@ -133,7 +134,7 @@ void DispatchOne(const PendingBridge& p)
 		break;
 	case BridgeKind::DiscordNotify:
 	{
-		const char* mapArg = p.map[0] ? p.map : "?";
+		const char* mapArg = p.map;
 		const char* reason = p.reason[0] ? p.reason : "detect";
 		if (p.name[0])
 			std::snprintf(cmd, sizeof(cmd), "css_anticheat_discord_notify %llu \"%s\" %s \"%s\" %d \"%s\" \"%s\"\n",
@@ -206,6 +207,12 @@ void AdminBridge_ApplyBan(uint64_t steamId, const char* playerName, float suspic
 	p.score = suspicionScore;
 	EscapeForCommand(playerName, p.name, sizeof(p.name));
 	EscapeForCommand(mapName, p.map, sizeof(p.map));
+	if (!p.map[0] || (p.map[0] == '?' && !p.map[1]))
+	{
+		char resolved[96]{};
+		AC_ResolveMapName(resolved, sizeof(resolved));
+		EscapeForCommand(resolved, p.map, sizeof(p.map));
+	}
 	EscapeForCommand(detectReason, p.reason, sizeof(p.reason));
 	if (!p.reason[0])
 		std::snprintf(p.reason, sizeof(p.reason), "detect");
@@ -244,6 +251,12 @@ void AdminBridge_DiscordNotify(uint64_t steamId, const char* playerName, float s
 	p.resend = resend;
 	EscapeForCommand(playerName, p.name, sizeof(p.name));
 	EscapeForCommand(mapName, p.map, sizeof(p.map));
+	if (!p.map[0] || (p.map[0] == '?' && !p.map[1]))
+	{
+		char resolved[96]{};
+		AC_ResolveMapName(resolved, sizeof(resolved));
+		EscapeForCommand(resolved, p.map, sizeof(p.map));
+	}
 	EscapeForCommand(detectReason, p.reason, sizeof(p.reason));
 	if (!p.reason[0])
 		std::snprintf(p.reason, sizeof(p.reason), "detect");

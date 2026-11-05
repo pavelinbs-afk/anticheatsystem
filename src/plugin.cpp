@@ -239,3 +239,72 @@ KHook::Return<void> AntiCheatPlugin::Hook_ClientDisconnect(IServerGameClients*, 
 		AntiCheatCore::GetInstance()->OnPlayerDisconnect(iSlot, xuid);
 	return { KHook::Action::Ignore };
 }
+
+static void AC_CopyBareMapName(const char* raw, char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+		return;
+	out[0] = '\0';
+	if (!raw || !raw[0] || (raw[0] == '?' && !raw[1]))
+		return;
+
+	const char* start = raw;
+	for (const char* p = raw; *p; ++p)
+	{
+		if (*p == '/' || *p == '\\')
+			start = p + 1;
+	}
+	if (!start[0] || (start[0] == '?' && !start[1]))
+		return;
+
+	V_strncpy(out, start, outSize);
+	size_t len = V_strlen(out);
+	auto strip_ext = [&](const char* ext)
+	{
+		const size_t el = V_strlen(ext);
+		if (len < el)
+			return;
+		bool ok = true;
+		for (size_t i = 0; i < el; ++i)
+		{
+			char a = out[len - el + i];
+			char b = ext[i];
+			if (a >= 'A' && a <= 'Z')
+				a = char(a - 'A' + 'a');
+			if (a != b)
+			{
+				ok = false;
+				break;
+			}
+		}
+		if (ok)
+		{
+			out[len - el] = '\0';
+			len -= el;
+		}
+	};
+	strip_ext(".vpk");
+	strip_ext(".bsp");
+	if (!out[0] || (out[0] == '?' && !out[1]))
+		out[0] = '\0';
+}
+
+void AC_ResolveMapName(char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+		return;
+	out[0] = '\0';
+
+	if (g_pNetServerService)
+	{
+		if (CNetworkGameServerBase* srv = g_pNetServerService->GetIGameServer())
+		{
+			AC_CopyBareMapName(srv->GetMapName(), out, outSize);
+			if (out[0])
+				return;
+		}
+	}
+
+	if (CGlobalVars* gv = GetGlobals())
+		AC_CopyBareMapName(STRING(gv->mapname), out, outSize);
+}
