@@ -11,7 +11,12 @@ bash build_cmake.sh
 
 Артефакты: `build/addons/anticheat/` + `build/addons/metamod/anticheat.vdf`.
 
-Нужны Docker (для совместимого GLIBC) или Ubuntu 20.04/22.04. Зависимости `deps/hl2sdk-cs2` и `deps/metamod-source` клонируются рядом в `pluginscpp/deps` (общие с CustomRounds/lr_core).
+Нужны Docker (для совместимого GLIBC) или Ubuntu 20.04/22.04. Зависимости рядом в `pluginscpp/deps`:
+- `hl2sdk-cs2`
+- `metamod-source-sh` — pre-KHook MetaMod (**SourceHook**, ветка `main`)
+- `metamod-source` — текущий MetaMod (**KHook**, ветка `feature/khook`)
+
+`build_cmake.sh` выбирает MetaMod по `CMakeLists.txt` (есть `sourcehook` → `-sh`). Override: `AC_MMS_PATH=...`.
 
 ## Установка
 

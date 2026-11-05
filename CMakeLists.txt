@@ -37,6 +37,8 @@ set(_ac_roots
 )
 foreach(_root IN LISTS _ac_roots)
   list(APPEND _ac_hl2sdk_candidates "${_root}/deps/hl2sdk-cs2")
+  # Prefer pre-KHook MetaMod (SourceHook) for this branch; current MMS removed SH_* APIs.
+  list(APPEND _ac_mms_candidates "${_root}/deps/metamod-source-sh")
   list(APPEND _ac_mms_candidates "${_root}/deps/metamod-source")
 endforeach()
 

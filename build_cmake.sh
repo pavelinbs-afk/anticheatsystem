@@ -4,6 +4,11 @@
 # Usage:
 #   cd cs2-anticheat && bash build_cmake.sh
 #   AC_NATIVE=1 bash build_cmake.sh   # local build (Ubuntu 20.04/22.04 only)
+#
+# MetaMod:
+#   main (SourceHook)     -> deps/metamod-source-sh  (pre-KHook checkout)
+#   feature/khook (KHook) -> deps/metamod-source     (current MMS)
+# Override: AC_MMS_PATH=/path/to/metamod-source bash build_cmake.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,16 +107,51 @@ if [ ! -f "$DEPS/hl2sdk-cs2/public/tier0/dbg.h" ]; then
 fi
 
 if [ ! -f "$DEPS/metamod-source/core/ISmmPlugin.h" ]; then
-  echo "==> Cloning metamod-source"
+  echo "==> Cloning metamod-source (current / KHook)"
   git clone --recursive --depth 1 https://github.com/alliedmodders/metamod-source.git "$DEPS/metamod-source"
 fi
+
+# Pick MetaMod tree: SourceHook branch needs pre-KHook headers (SH_* / META_IFACEPTR).
+if [ -n "${AC_MMS_PATH:-}" ]; then
+  MMS_DIR="$AC_MMS_PATH"
+elif grep -q 'MMS_CORE}/sourcehook' "$ROOT/CMakeLists.txt"; then
+  MMS_DIR="$DEPS/metamod-source-sh"
+else
+  MMS_DIR="$DEPS/metamod-source"
+fi
+
+if [ ! -f "$MMS_DIR/core/ISmmPlugin.h" ]; then
+  if [[ "$MMS_DIR" == *metamod-source-sh ]]; then
+    cat >&2 <<EOF
+ERROR: SourceHook MetaMod not found at:
+  $MMS_DIR
+
+Create it from the full metamod-source repo (pre-KHook commit):
+  cd "$WORK_ROOT/metamod-source"
+  git worktree add "$DEPS/metamod-source-sh" 7ec0f16948ab3a0910a98b4ac10e1c0e360d5339
+EOF
+  else
+    echo "ERROR: MetaMod not found at $MMS_DIR" >&2
+  fi
+  exit 1
+fi
+
+if grep -q 'MMS_CORE}/sourcehook' "$ROOT/CMakeLists.txt"; then
+  if grep -q 'khook.hpp' "$MMS_DIR/core/ISmmPlugin.h"; then
+    echo "ERROR: $MMS_DIR is a KHook MetaMod, but this branch needs SourceHook (SH_*)." >&2
+    echo "Use deps/metamod-source-sh (commit 7ec0f16) or set AC_MMS_PATH." >&2
+    exit 1
+  fi
+fi
+
+echo "==> MetaMod: $MMS_DIR"
 
 chmod +x "$DEPS/hl2sdk-cs2/devtools/bin/linux/protoc" 2>/dev/null || true
 
 cmake -S "$ROOT" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DHL2SDK_PATH="$DEPS/hl2sdk-cs2" \
-  -DMMS_PATH="$DEPS/metamod-source"
+  -DMMS_PATH="$MMS_DIR"
 
 cmake --build "$BUILD" -j"$(nproc)"
 
