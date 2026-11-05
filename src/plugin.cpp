@@ -8,6 +8,7 @@
 #include "anticheat_core.h"
 #include "vtable_finder.h"
 #include "players.h"
+#include "commands.h"
 
 AntiCheatPlugin g_AntiCheatPlugin;
 PLUGIN_EXPOSE(AntiCheatPlugin, g_AntiCheatPlugin);
@@ -47,6 +48,18 @@ SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayer
 
 static IServerGameClients* g_pGameClients = nullptr;
 
+static bool g_acDebugLog = false;
+
+void AC_SetDebugLog(bool enabled)
+{
+	g_acDebugLog = enabled;
+}
+
+bool AC_IsDebugLogEnabled()
+{
+	return g_acDebugLog;
+}
+
 void AC_Log(const char* fmt, ...)
 {
 	char buf[512];
@@ -55,6 +68,18 @@ void AC_Log(const char* fmt, ...)
 	V_vsnprintf(buf, sizeof(buf), fmt, va);
 	va_end(va);
 	ConColorMsg(Color(120, 200, 120, 255), "[anticheat] %s\n", buf);
+}
+
+void AC_LogDebug(const char* fmt, ...)
+{
+	if (!g_acDebugLog)
+		return;
+	char buf[512];
+	va_list va;
+	va_start(va, fmt);
+	V_vsnprintf(buf, sizeof(buf), fmt, va);
+	va_end(va);
+	ConColorMsg(Color(140, 160, 140, 255), "[anticheat][debug] %s\n", buf);
 }
 
 void AC_LogCritical(const char* fmt, ...)
@@ -117,6 +142,8 @@ bool AntiCheatPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxle
 		V_strncpy(error, "AntiCheatCore init failed", maxlen);
 		return false;
 	}
+
+	Commands_Register();
 
 	AC_Log("loaded %s v%s (%s)", GetName(), GetVersion(), GetDate());
 	META_CONPRINTF("[%s] Loaded %s v%s\n", GetLogTag(), GetName(), GetVersion());
@@ -200,4 +227,73 @@ void AntiCheatPlugin::Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnect
 	if (iSlot < 0 || iSlot >= AC_MAXPLAYERS)
 		return;
 	AntiCheatCore::GetInstance()->OnPlayerDisconnect(iSlot, xuid);
+}
+
+static void AC_CopyBareMapName(const char* raw, char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+		return;
+	out[0] = '\0';
+	if (!raw || !raw[0] || (raw[0] == '?' && !raw[1]))
+		return;
+
+	const char* start = raw;
+	for (const char* p = raw; *p; ++p)
+	{
+		if (*p == '/' || *p == '\\')
+			start = p + 1;
+	}
+	if (!start[0] || (start[0] == '?' && !start[1]))
+		return;
+
+	V_strncpy(out, start, outSize);
+	size_t len = V_strlen(out);
+	auto strip_ext = [&](const char* ext)
+	{
+		const size_t el = V_strlen(ext);
+		if (len < el)
+			return;
+		bool ok = true;
+		for (size_t i = 0; i < el; ++i)
+		{
+			char a = out[len - el + i];
+			char b = ext[i];
+			if (a >= 'A' && a <= 'Z')
+				a = char(a - 'A' + 'a');
+			if (a != b)
+			{
+				ok = false;
+				break;
+			}
+		}
+		if (ok)
+		{
+			out[len - el] = '\0';
+			len -= el;
+		}
+	};
+	strip_ext(".vpk");
+	strip_ext(".bsp");
+	if (!out[0] || (out[0] == '?' && !out[1]))
+		out[0] = '\0';
+}
+
+void AC_ResolveMapName(char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+		return;
+	out[0] = '\0';
+
+	if (g_pNetServerService)
+	{
+		if (CNetworkGameServerBase* srv = g_pNetServerService->GetIGameServer())
+		{
+			AC_CopyBareMapName(srv->GetMapName(), out, outSize);
+			if (out[0])
+				return;
+		}
+	}
+
+	if (CGlobalVars* gv = GetGlobals())
+		AC_CopyBareMapName(STRING(gv->mapname), out, outSize);
 }

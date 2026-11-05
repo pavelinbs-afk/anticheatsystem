@@ -3,8 +3,38 @@
 #include "../plugin.h"
 
 #include <cstdio>
+#include <cstring>
+#include <cstddef>
+#include <deque>
 
-static void EscapeForCommand(const char* in, char* out, size_t outSize)
+namespace {
+
+enum class BridgeKind : uint8_t
+{
+	Ban,
+	Report,
+	Warn,
+};
+
+struct PendingBridge
+{
+	BridgeKind kind = BridgeKind::Report;
+	uint64_t steamId = 0;
+	char name[96]{};
+	char map[96]{};
+	char reason[96]{};
+	float score = 0.0f;
+	int attemptsLeft = 0;
+	float nextAt = 0.0f;
+};
+
+constexpr int kMaxPending = 48;
+constexpr int kDefaultRetries = 2;      // initial send + 2 retries
+constexpr float kRetryIntervalSec = 1.5f;
+
+std::deque<PendingBridge> g_pending;
+
+void EscapeForCommand(const char* in, char* out, size_t outSize)
 {
 	if (!out || outSize == 0)
 		return;
@@ -24,60 +54,161 @@ static void EscapeForCommand(const char* in, char* out, size_t outSize)
 	out[j] = '\0';
 }
 
-void AdminBridge_ApplyBan(uint64_t steamId, const char* playerName)
+const char* PluginVersion()
 {
-	if (!g_pEngine || steamId == 0)
+	const char* v = g_AntiCheatPlugin.GetVersion();
+	return (v && v[0]) ? v : "0.0.0";
+}
+
+void FormatScoreInvariant(float score, char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+		return;
+	std::snprintf(out, outSize, "%.1f", score);
+	for (char* p = out; *p; ++p)
+	{
+		if (*p == ',')
+			*p = '.';
+	}
+}
+
+void DispatchOne(const PendingBridge& p)
+{
+	if (!g_pEngine || p.steamId == 0)
 		return;
 
-	char safeName[96];
-	EscapeForCommand(playerName, safeName, sizeof(safeName));
+	char scoreBuf[32];
+	FormatScoreInvariant(p.score, scoreBuf, sizeof(scoreBuf));
+	const char* ver = PluginVersion();
+	char cmd[560];
 
-	char cmd[320];
-	if (safeName[0])
-		std::snprintf(cmd, sizeof(cmd), "css_anticheat_apply_ban %llu \"%s\"\n",
-			(unsigned long long)steamId, safeName);
-	else
-		std::snprintf(cmd, sizeof(cmd), "css_anticheat_apply_ban %llu\n",
-			(unsigned long long)steamId);
+	switch (p.kind)
+	{
+	case BridgeKind::Ban:
+	{
+		// Empty map → AdminPlugin fills Server.MapName (do not send "?").
+		const char* mapArg = p.map;
+		const char* reason = p.reason[0] ? p.reason : "detect";
+		if (p.name[0])
+			std::snprintf(cmd, sizeof(cmd), "css_anticheat_apply_ban %llu \"%s\" %s \"%s\" \"%s\" \"%s\"\n",
+				(unsigned long long)p.steamId, p.name, scoreBuf, mapArg, reason, ver);
+		else
+			std::snprintf(cmd, sizeof(cmd), "css_anticheat_apply_ban %llu %s \"%s\" \"%s\" \"%s\"\n",
+				(unsigned long long)p.steamId, scoreBuf, mapArg, reason, ver);
+		AC_Log("bridge ban -> %s", cmd);
+		break;
+	}
+	case BridgeKind::Report:
+		if (p.name[0])
+			std::snprintf(cmd, sizeof(cmd), "css_anticheat_auto_report %llu \"%s\"\n",
+				(unsigned long long)p.steamId, p.name);
+		else
+			std::snprintf(cmd, sizeof(cmd), "css_anticheat_auto_report %llu\n",
+				(unsigned long long)p.steamId);
+		AC_Log("bridge report -> %s", cmd);
+		break;
+	case BridgeKind::Warn:
+		if (p.name[0])
+			std::snprintf(cmd, sizeof(cmd), "css_anticheat_admin_warn %llu %s \"%s\"\n",
+				(unsigned long long)p.steamId, scoreBuf, p.name);
+		else
+			std::snprintf(cmd, sizeof(cmd), "css_anticheat_admin_warn %llu %s\n",
+				(unsigned long long)p.steamId, scoreBuf);
+		AC_Log("bridge admin-warn -> %s", cmd);
+		break;
+	default:
+		return;
+	}
 
-	AC_Log("bridge ban -> %s", cmd);
 	g_pEngine->ServerCommand(cmd);
+}
+
+void Enqueue(PendingBridge p, float curtime, int retries = kDefaultRetries)
+{
+	if (!g_pEngine || p.steamId == 0)
+		return;
+
+	// Immediate dispatch.
+	DispatchOne(p);
+
+	if (retries <= 0)
+		return;
+
+	p.attemptsLeft = retries;
+	p.nextAt = curtime > 0.0f ? (curtime + kRetryIntervalSec) : kRetryIntervalSec;
+
+	while ((int)g_pending.size() >= kMaxPending)
+		g_pending.pop_front();
+	g_pending.push_back(p);
+}
+
+} // namespace
+
+void AdminBridge_Tick(float curtime)
+{
+	if (!g_pEngine || g_pending.empty())
+		return;
+
+	for (size_t i = 0; i < g_pending.size(); )
+	{
+		PendingBridge& p = g_pending[i];
+		if (curtime + 0.001f < p.nextAt)
+		{
+			++i;
+			continue;
+		}
+
+		DispatchOne(p);
+		p.attemptsLeft--;
+		if (p.attemptsLeft <= 0)
+		{
+			g_pending.erase(g_pending.begin() + (std::ptrdiff_t)i);
+			continue;
+		}
+		p.nextAt = curtime + kRetryIntervalSec;
+		++i;
+	}
+}
+
+void AdminBridge_ApplyBan(uint64_t steamId, const char* playerName, float suspicionScore, const char* mapName, const char* detectReason)
+{
+	PendingBridge p;
+	p.kind = BridgeKind::Ban;
+	p.steamId = steamId;
+	p.score = suspicionScore;
+	EscapeForCommand(playerName, p.name, sizeof(p.name));
+	EscapeForCommand(mapName, p.map, sizeof(p.map));
+	if (!p.map[0] || (p.map[0] == '?' && !p.map[1]))
+	{
+		char resolved[96]{};
+		AC_ResolveMapName(resolved, sizeof(resolved));
+		EscapeForCommand(resolved, p.map, sizeof(p.map));
+	}
+	EscapeForCommand(detectReason, p.reason, sizeof(p.reason));
+	if (!p.reason[0])
+		std::snprintf(p.reason, sizeof(p.reason), "detect");
+
+	CGlobalVars* gv = GetGlobals();
+	Enqueue(p, gv ? gv->curtime : 0.0f, kDefaultRetries);
 }
 
 void AdminBridge_SendReport(uint64_t steamId, const char* playerName)
 {
-	if (!g_pEngine || steamId == 0)
-		return;
-
-	char safeName[96];
-	EscapeForCommand(playerName, safeName, sizeof(safeName));
-	char cmd[256];
-	if (safeName[0])
-		std::snprintf(cmd, sizeof(cmd), "css_anticheat_auto_report %llu \"%s\"\n",
-			(unsigned long long)steamId, safeName);
-	else
-		std::snprintf(cmd, sizeof(cmd), "css_anticheat_auto_report %llu\n",
-			(unsigned long long)steamId);
-
-	AC_Log("bridge report -> %s", cmd);
-	g_pEngine->ServerCommand(cmd);
+	PendingBridge p;
+	p.kind = BridgeKind::Report;
+	p.steamId = steamId;
+	EscapeForCommand(playerName, p.name, sizeof(p.name));
+	CGlobalVars* gv = GetGlobals();
+	Enqueue(p, gv ? gv->curtime : 0.0f, kDefaultRetries);
 }
 
 void AdminBridge_WarnAdmins(uint64_t steamId, const char* playerName, float score)
 {
-	if (!g_pEngine || steamId == 0)
-		return;
-
-	char safeName[96];
-	EscapeForCommand(playerName, safeName, sizeof(safeName));
-	char cmd[320];
-	if (safeName[0])
-		std::snprintf(cmd, sizeof(cmd), "css_anticheat_admin_warn %llu %.1f \"%s\"\n",
-			(unsigned long long)steamId, score, safeName);
-	else
-		std::snprintf(cmd, sizeof(cmd), "css_anticheat_admin_warn %llu %.1f\n",
-			(unsigned long long)steamId, score);
-
-	AC_Log("bridge admin-warn -> %s", cmd);
-	g_pEngine->ServerCommand(cmd);
+	PendingBridge p;
+	p.kind = BridgeKind::Warn;
+	p.steamId = steamId;
+	p.score = score;
+	EscapeForCommand(playerName, p.name, sizeof(p.name));
+	CGlobalVars* gv = GetGlobals();
+	Enqueue(p, gv ? gv->curtime : 0.0f, kDefaultRetries);
 }

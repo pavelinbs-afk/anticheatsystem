@@ -12,14 +12,21 @@ struct AntiCheatConfig {
 	float speed_threshold = 520.0f;
 	bool enable_bhop_detection = false;
 
-	float monitor_threshold = 15.0f;
-	float warn_threshold = 25.0f;
-	float report_threshold = 35.0f;
-	float ban_threshold = 50.0f;
+	// Confidence 0–100 (not a linear point sum). Ban needs 2 channels or heavy rage.
+	float monitor_threshold = 22.0f;
+	float warn_threshold = 34.0f;
+	float report_threshold = 45.0f;
+	float admin_warn_threshold = 56.0f; // HTML warn to admins
+	float ban_threshold = 70.0f;        // after warn + corroboration
+	float fast_ban_threshold = 82.0f;   // after warn, reach this within window + 2 channels
+	float fast_ban_window_sec = 60.0f;
 
 	int ban_duration_days = 45;
 	std::string ban_reason = "Использование читов (Античит система)";
 	int ban_countdown_seconds = 10;
+	// Verbose console spam (staff reload, file scan ok, score ticks, shot traces).
+	// Important events (ban/report/warn/critical) always use AC_Log / AC_LogCritical.
+	bool enable_debug_log = false;
 
 	bool enable_aim_detection = true;
 	bool enable_wallhack_detection = true;
@@ -28,12 +35,14 @@ struct AntiCheatConfig {
 	bool enable_stats_tracking = true;
 	bool enable_movement_detection = true;
 	bool enable_fps_drop_detection = false;
-	bool enable_game_file_scan = true;
+	// Optional: watch SERVER gamedir (anticheat.so / gameinfo.gi on the dedicated host).
+	// Cannot read client files — CS2 dedicated has no access to player gameinfo.gi.
+	bool enable_game_file_scan = false;
 
-	// WH / smoke
-	float wh_track_fov_deg = 3.0f;
-	float wh_min_track_distance = 800.0f;
-	int wh_streak_ticks = 96;
+	// WH / smoke — long distant FOV lock only (avoid accidental peek aim)
+	float wh_track_fov_deg = 3.5f;
+	float wh_min_track_distance = 500.0f;
+	int wh_streak_ticks = 240; // ~3.75s @64 tick (3.5–4s window)
 
 	// Client FPS hitch thresholds (GetRemoteFramerate) — only severe stalls
 	float fps_max_frame_ms = 70.0f;
@@ -51,7 +60,7 @@ struct AntiCheatConfig {
 	float shot_min_hit_distance = 200.0f;
 	int shot_min_shots_before_score = 3;
 
-	// Backend bypass/IP check → GET /api/cs2/anticheat/check (same logic as site /bypass)
+	// Bypass/IP check via local curl → GET /api/cs2/anticheat/check (same logic as site /bypass)
 	bool enable_backend_check = true;
 	std::string backend_api_url = "https://perfecteam.ru";
 	std::string backend_api_token = ""; // Bearer = CS2_FREEZE_SERVICE_TOKEN / CS_PLUGIN_SECRET

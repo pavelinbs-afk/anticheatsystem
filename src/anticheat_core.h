@@ -43,6 +43,9 @@ public:
 	PlayerProfile* GetPlayerBySlot(int slot);
 	PlayerProfile* GetPlayerProfile(uint64_t steamID);
 	const AntiCheatConfig& GetConfig() const { return m_Config; }
+	void PrintStatus() const;
+	/// Freeze autoban for this steam until disconnect (no console command; internal/API hook).
+	void SetAdminCheckHold(uint64_t steamId, bool hold);
 
 private:
 	AntiCheatCore() = default;

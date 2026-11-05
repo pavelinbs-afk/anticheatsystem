@@ -40,10 +40,7 @@ float AimAnalyzer::Analyze(PlayerProfile& player, float deltaTime)
 	float dPitch = AngleDifference(player.viewAngles.pitch, player.lastViewAngles.pitch);
 	float dYaw = AngleDifference(player.viewAngles.yaw, player.lastViewAngles.yaw);
 	float snapAngle = std::sqrt(dPitch * dPitch + dYaw * dYaw);
-
-	player.angleDeltaHistory.push_back(snapAngle);
-	while (player.angleDeltaHistory.size() > 64)
-		player.angleDeltaHistory.pop_front();
+	// angleDeltaHistory is owned by SampleAllPlayers — do not double-write here.
 
 	// Per-tick snaps without a shot are mostly look-around / legit flicks.
 	// Only score blatant spinbot-class snaps here; combat snaps go through ShotTracker.

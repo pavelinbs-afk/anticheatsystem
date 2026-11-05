@@ -28,20 +28,21 @@ AntiCheatCore* AntiCheatCore::s_Instance = nullptr;
 AntiCheatCore* AntiCheatCore::GetInstance()
 {
 	if (!s_Instance)
-		s_Instance = new AntiCheatCore();
-	return s_Instance;
+        s_Instance = new AntiCheatCore();
+    return s_Instance;
 }
 
 bool AntiCheatCore::Initialize()
 {
 	m_Config = AntiCheatConfig::LoadFromFile("addons/anticheat/configs/anticheat_config.json");
+	AC_SetDebugLog(m_Config.enable_debug_log);
 
-	m_AimAnalyzer = std::make_unique<AimAnalyzer>();
-	m_WallhackDetector = std::make_unique<WallhackDetector>();
-	m_MovementAnalyzer = std::make_unique<MovementAnalyzer>();
-	m_StatisticsTracker = std::make_unique<StatisticsTracker>();
-	m_IntegrityChecker = std::make_unique<IntegrityChecker>();
-	m_SuspicionScorer = std::make_unique<SuspicionScorer>();
+    m_AimAnalyzer = std::make_unique<AimAnalyzer>();
+    m_WallhackDetector = std::make_unique<WallhackDetector>();
+    m_MovementAnalyzer = std::make_unique<MovementAnalyzer>();
+    m_StatisticsTracker = std::make_unique<StatisticsTracker>();
+    m_IntegrityChecker = std::make_unique<IntegrityChecker>();
+    m_SuspicionScorer = std::make_unique<SuspicionScorer>();
 	m_FpsDropDetector = std::make_unique<FpsDropDetector>();
 	m_GameFileScanner = std::make_unique<GameFileScanner>();
 	m_ShotTracker = std::make_unique<ShotTracker>();
@@ -56,7 +57,8 @@ bool AntiCheatCore::Initialize()
 	m_MovementAnalyzer->SetConfig(m_Config.speed_threshold, 800.0f);
 	m_FpsDropDetector->SetConfig(m_Config.fps_max_frame_ms, m_Config.fps_spike_stddev_ms, m_Config.fps_min_spikes);
 	m_SuspicionScorer->SetThresholds(m_Config.monitor_threshold, m_Config.warn_threshold,
-		m_Config.report_threshold, m_Config.ban_threshold, m_Config.score_decay_per_second);
+		m_Config.report_threshold, m_Config.admin_warn_threshold, m_Config.ban_threshold,
+		m_Config.score_decay_per_second, m_Config.fast_ban_threshold, m_Config.fast_ban_window_sec);
 	m_ShotTracker->SetConfig(m_Config.shot_hit_window_sec, m_Config.shot_aim_fov_deg,
 		m_Config.shot_min_hit_distance, m_Config.shot_min_shots_before_score);
 	m_GameFileScanner->SetEnabled(m_Config.enable_game_file_scan);
@@ -65,7 +67,8 @@ bool AntiCheatCore::Initialize()
 
 	std::memset(m_SlotToSteam, 0, sizeof(m_SlotToSteam));
 	AC_Log("core initialized (shot_track=%d backend=%d staff_exempt=%d)",
-		(int)m_Config.enable_shot_tracking, (int)m_BackendClient->IsEnabled(),
+		(int)m_Config.enable_shot_tracking,
+		(int)m_BackendClient->IsEnabled(),
 		(int)(m_StaffExempt ? m_StaffExempt->Size() : 0));
 	return true;
 }
@@ -82,7 +85,7 @@ void AntiCheatCore::AddSoftScore(uint64_t steamId, const char* module, float sco
 	if (m_Config.enable_network_safety && m_NetworkSafety && netProfile &&
 		m_NetworkSafety->ShouldVetoSoftDetections(*netProfile))
 	{
-		AC_Log("network veto +%.1f [%s] steam=%llu ping=%.0f jitter=%.0f (soft detect skipped)",
+		AC_LogDebug("network veto +%.1f [%s] steam=%llu ping=%.0f jitter=%.0f (soft detect skipped)",
 			score, module, (unsigned long long)steamId,
 			netProfile->lastPingMs, netProfile->lastJitterMs);
 		return;
@@ -94,6 +97,52 @@ void AntiCheatCore::Shutdown()
 {
 	m_PlayerProfiles.clear();
 	AC_Log("core shutdown");
+}
+
+void AntiCheatCore::PrintStatus() const
+{
+	int tracked = (int)m_PlayerProfiles.size();
+	int slots = 0;
+	for (int i = 0; i < AC_MAXPLAYERS; ++i)
+	{
+		if (m_SlotToSteam[i])
+			++slots;
+	}
+
+	Msg("  core        : OK\n");
+	Msg("  players     : tracked=%d slots_mapped=%d staff_exempt=%zu\n",
+		tracked, slots, m_StaffExempt ? m_StaffExempt->Size() : 0);
+	Msg("  backend     : %s (local curl check)\n",
+		(m_BackendClient && m_BackendClient->IsEnabled()) ? "ON" : "OFF");
+	Msg("  confidence  : monitor=%.0f warn=%.0f report=%.0f admin_warn=%.0f ban=%.0f fast=%.0f/%.0fs (watch, 2-channel ban)\n",
+		m_Config.monitor_threshold, m_Config.warn_threshold, m_Config.report_threshold,
+		m_Config.admin_warn_threshold, m_Config.ban_threshold,
+		m_Config.fast_ban_threshold, m_Config.fast_ban_window_sec);
+	Msg("  ban         : days=%d reason=\"%s\"\n",
+		m_Config.ban_duration_days, m_Config.ban_reason.c_str());
+	Msg("  modules     : aim=%d wh=%d move=%d stats=%d fps=%d shots=%d combat=%d netsafe=%d server_filescan=%d (client files N/A)\n",
+		(int)m_Config.enable_aim_detection,
+		(int)m_Config.enable_wallhack_detection,
+		(int)m_Config.enable_movement_detection,
+		(int)m_Config.enable_stats_tracking,
+		(int)m_Config.enable_fps_drop_detection,
+		(int)m_Config.enable_shot_tracking,
+		(int)m_Config.enable_combat_heuristics,
+		(int)m_Config.enable_network_safety,
+		(int)m_Config.enable_game_file_scan);
+	Msg("  subsystems  : aim=%d wh=%d move=%d stats=%d fps=%d shot=%d combat=%d net=%d scorer=%d scan=%d backend=%d staff=%d\n",
+		m_AimAnalyzer ? 1 : 0,
+		m_WallhackDetector ? 1 : 0,
+		m_MovementAnalyzer ? 1 : 0,
+		m_StatisticsTracker ? 1 : 0,
+		m_FpsDropDetector ? 1 : 0,
+		m_ShotTracker ? 1 : 0,
+		m_CombatHeuristics ? 1 : 0,
+		m_NetworkSafety ? 1 : 0,
+		m_SuspicionScorer ? 1 : 0,
+		m_GameFileScanner ? 1 : 0,
+		m_BackendClient ? 1 : 0,
+		m_StaffExempt ? 1 : 0);
 }
 
 std::string AntiCheatCore::GetClientIpForSlot(int slot)
@@ -154,6 +203,21 @@ void AntiCheatCore::QueueBackendCheck(PlayerProfile* profile)
 	if (profile->ipAddress.empty() && !req.clientIp.empty())
 		profile->ipAddress = req.clientIp;
 	m_BackendClient->RequestCheck(req);
+
+	if (req.clientIp.empty())
+	{
+		// IP often arrives a beat late — re-send once it is known (see SampleAllPlayers).
+		CGlobalVars* gv = GetGlobals();
+		profile->backendCheckPending = true;
+		profile->backendCheckDone = false;
+		profile->backendCheckAttempts = 1;
+		profile->backendCheckNextAt = (gv ? gv->curtime : 0.0f) + 2.0f;
+	}
+	else
+	{
+		profile->backendCheckPending = false;
+		profile->backendCheckDone = true;
+	}
 }
 
 void AntiCheatCore::ProcessBackendResults()
@@ -242,12 +306,12 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 	if (slot < 0 || slot >= AC_MAXPLAYERS || steamID == 0)
 		return;
 
-	auto profile = std::make_shared<PlayerProfile>();
-	profile->steamId = steamID;
+    auto profile = std::make_shared<PlayerProfile>();
+    profile->steamId = steamID;
 	profile->slot = slot;
 	profile->name = name ? name : "";
-	profile->connectionTime = std::chrono::steady_clock::now();
-	profile->lastActivityTime = profile->connectionTime;
+    profile->connectionTime = std::chrono::steady_clock::now();
+    profile->lastActivityTime = profile->connectionTime;
 	profile->ipAddress = GetClientIpForSlot(slot);
 
 	CGlobalVars* gv = GetGlobals();
@@ -264,11 +328,8 @@ void AntiCheatCore::OnPlayerConnect(int slot, uint64_t steamID, const char* name
 			(unsigned long long)steamID);
 	}
 
-	m_PlayerProfiles[steamID] = profile;
+    m_PlayerProfiles[steamID] = profile;
 	m_SlotToSteam[slot] = steamID;
-
-	if (m_GameFileScanner && m_Config.enable_game_file_scan)
-		m_GameFileScanner->ScanOnPlayerJoin(steamID, profile->name.c_str());
 
 	if (IsStaffExempt(steamID))
 	{
@@ -286,7 +347,11 @@ void AntiCheatCore::OnPlayerDisconnect(int slot, uint64_t steamID)
 	if (slot >= 0 && slot < AC_MAXPLAYERS)
 		m_SlotToSteam[slot] = 0;
 	if (sid)
+	{
+		if (m_SuspicionScorer)
+			m_SuspicionScorer->SetAdminCheckHold(sid, false);
 		m_PlayerProfiles.erase(sid);
+	}
 }
 
 PlayerProfile* AntiCheatCore::GetPlayerBySlot(int slot)
@@ -311,7 +376,8 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 		attacker = nullptr;
 	if (attacker && victim && attacker->steamId != victim->steamId)
 	{
-		attacker->kills++;
+        attacker->kills++;
+		attacker->killsThisRound++;
 		if (headshot)
 			attacker->headshots++;
 
@@ -329,7 +395,7 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 		// Kill-time aim is a secondary signal; primary aim scoring is on all shots/hits.
 		float aimScore = m_AimAnalyzer->OnPlayerShoot(*attacker, *victim, headshot, dist);
 		if (aimScore > 0.0f)
-			m_SuspicionScorer->AddScore(attacker->steamId, "AimAnalyzer", aimScore, "Combat aim anomaly");
+			AddSoftScore(attacker->steamId, "AimAnalyzer", aimScore, "Combat aim anomaly", attacker);
 
 		if (m_Config.enable_wallhack_detection || m_Config.enable_smoke_detection)
 		{
@@ -344,14 +410,21 @@ void AntiCheatCore::OnPlayerDeath(int attackerSlot, int victimSlot, bool headsho
 			float whScore = m_WallhackDetector->OnCombatKill(*attacker, *victim, flags);
 			if (whScore > 0.0f)
 			{
-				const char* reason = thrusmoke ? "Smoke kill" : (attackerblind ? "Blind kill" : "Wallbang/prefire");
-				m_SuspicionScorer->AddScore(attacker->steamId, "WallhackDetector", whScore, reason);
+				const char* reason = "Wallbang kill";
+				if (thrusmoke)
+					reason = "Smoke kill";
+				else if (attackerblind)
+					reason = "Blind kill";
+				else if (attacker->wallAimTargetSteam == victim->steamId &&
+					attacker->wallAimStreak >= m_Config.wh_streak_ticks)
+					reason = "Prefire kill";
+				AddSoftScore(attacker->steamId, "WallhackDetector", whScore, reason, attacker);
 			}
 		}
 	}
 	if (victim)
 	{
-		victim->deaths++;
+        victim->deaths++;
 		CGlobalVars* gv = GetGlobals();
 		victim->movementIgnoreUntil = (gv ? gv->curtime : 0.0f) + 3.0f;
 		victim->samplesValid = false;
@@ -368,11 +441,8 @@ void AntiCheatCore::OnPlayerHurt(int attackerSlot, int victimSlot, float damage,
 	if (IsStaffExempt(attacker->steamId))
 		return;
 
-	attacker->totalDamage += damage;
+        attacker->totalDamage += damage;
 	attacker->shotsHit++;
-
-	if (!m_Config.enable_shot_tracking || !m_ShotTracker)
-		return;
 
 	// Fresh sample at event time — GameFrame angles can be a tick stale.
 	float pos[3]{}, ang[3]{}, vel[3]{};
@@ -390,15 +460,34 @@ void AntiCheatCore::OnPlayerHurt(int attackerSlot, int victimSlot, float damage,
 
 	CGlobalVars* gv = GetGlobals();
 	const float curtime = gv ? gv->curtime : 0.0f;
-	float score = m_ShotTracker->OnPlayerHurt(*attacker, *victim, damage, hitgroup, curtime);
-	if (score > 0.0f)
-		AddSoftScore(attacker->steamId, "ShotTracker", score, "Shot aim anomaly", attacker);
+
+	if (m_Config.enable_shot_tracking && m_ShotTracker)
+	{
+		float score = m_ShotTracker->OnPlayerHurt(*attacker, *victim, damage, hitgroup, curtime);
+		if (score > 0.0f)
+			AddSoftScore(attacker->steamId, "ShotTracker", score, "Shot aim anomaly", attacker);
+	}
 
 	if (m_Config.enable_combat_heuristics && m_CombatHeuristics)
 	{
 		float hScore = m_CombatHeuristics->OnPlayerHurt(*attacker, *victim, curtime);
 		if (hScore > 0.0f)
 			AddSoftScore(attacker->steamId, "CombatHeuristics", hScore, "Trigger/accuracy", attacker);
+	}
+
+	if (m_Config.enable_wallhack_detection && m_WallhackDetector)
+	{
+		const float dist = VectorDistance(attacker->position, victim->position);
+		CombatKillFlags whFlags;
+		whFlags.headshot = (hitgroup == 1);
+		whFlags.distance = dist;
+		// Hurt events lack smoke/pen flags; score distant FOV-lock prefire hits.
+		float whScore = m_WallhackDetector->OnCombatHurt(*attacker, *victim, whFlags, hitgroup == 1);
+		if (whScore > 0.0f)
+		{
+			const char* reason = (attacker->wallAimTargetSteam == victim->steamId) ? "Prefire hit" : "Wallhack hit";
+			AddSoftScore(attacker->steamId, "WallhackDetector", whScore, reason, attacker);
+		}
 	}
 }
 
@@ -467,21 +556,46 @@ void AntiCheatCore::SampleAllPlayers()
 		const float dPitch = AngleDifference(profile->viewAngles.pitch, profile->lastViewAngles.pitch);
 		const float dYaw = AngleDifference(profile->viewAngles.yaw, profile->lastViewAngles.yaw);
 		const float snap = std::sqrt(dPitch * dPitch + dYaw * dYaw);
-		profile->angleHistory.push_back(profile->viewAngles);
-		while (profile->angleHistory.size() > 128)
-			profile->angleHistory.pop_front();
 		profile->angleDeltaHistory.push_back(snap);
-		while (profile->angleDeltaHistory.size() > 128)
+		while (profile->angleDeltaHistory.size() > 48)
 			profile->angleDeltaHistory.pop_front();
-		profile->positionHistory.push_back(profile->position);
-		while (profile->positionHistory.size() > 128)
-			profile->positionHistory.pop_front();
 
 		// Air heuristic: vertical velocity
 		profile->inAir = std::fabs(profile->velocity.z) > 20.0f;
 
 		if (profile->ipAddress.empty())
 			profile->ipAddress = GetClientIpForSlot(profile->slot);
+
+		// Sticky backend-check: re-send when the client IP arrives late.
+		if (m_BackendClient && m_BackendClient->IsEnabled() &&
+			profile->backendCheckPending && !profile->backendCheckDone)
+		{
+			CGlobalVars* gv = GetGlobals();
+			const float now = gv ? gv->curtime : 0.0f;
+			if (now >= profile->backendCheckNextAt)
+			{
+				const bool haveIp = !profile->ipAddress.empty();
+				if (haveIp)
+				{
+					BackendCheckRequest req;
+					req.steamId = profile->steamId;
+					req.slot = profile->slot;
+					req.playerName = profile->name;
+					req.clientIp = profile->ipAddress;
+					m_BackendClient->RequestCheck(req);
+				}
+				profile->backendCheckAttempts++;
+				if (haveIp || profile->backendCheckAttempts >= 5)
+				{
+					profile->backendCheckDone = true;
+					profile->backendCheckPending = false;
+				}
+				else
+				{
+					profile->backendCheckNextAt = now + 2.0f;
+				}
+			}
+		}
 	}
 }
 
@@ -495,6 +609,10 @@ void AntiCheatCore::OnGameFrame()
 		deltaTime = 0.015f;
 
 	SampleAllPlayers();
+	{
+		CGlobalVars* gvBridge = GetGlobals();
+		AdminBridge_Tick(gvBridge ? gvBridge->curtime : 0.0f);
+	}
 	ProcessBackendResults();
 	m_SuspicionScorer->DecayScores(deltaTime);
 
@@ -527,10 +645,18 @@ void AntiCheatCore::OnRoundStart()
 	{
 		(void)steamID;
 		profile->roundsPlayed++;
+		profile->killsThisRound = 0;
 		profile->movementIgnoreUntil = now + 3.0f;
 		profile->samplesValid = false;
 		profile->wallAimStreak = 0;
 		profile->wallAimTargetSteam = 0;
+		profile->wallTrackScoreTicks = 0;
+		profile->movementSpeedStreak = 0;
+		profile->pendingRageSnapDeg = 0.0f;
+		profile->pendingRageSnapUntil = 0.0f;
+		profile->pendingRageSnapTarget = 0;
+		while (profile->recentShots.size() > 8)
+			profile->recentShots.pop_front();
 	}
 }
 
@@ -559,8 +685,8 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 	CGlobalVars* gv = GetGlobals();
 	const float curtime = gv ? gv->curtime : 0.0f;
 
-	float scoreDelta = 0.0f;
-
+    float scoreDelta = 0.0f;
+    
 	if (g_pEngine && m_Config.enable_network_safety && m_NetworkSafety)
 	{
 		INetChannelInfo* net = g_pEngine->GetPlayerNetInfo(CPlayerSlot(profile->slot));
@@ -574,19 +700,23 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 
 	if (m_Config.enable_aim_detection && alive && team >= 2)
 	{
-		scoreDelta = m_AimAnalyzer->Analyze(*profile, 0.015f);
+        scoreDelta = m_AimAnalyzer->Analyze(*profile, 0.015f);
 		if (scoreDelta > 0.0f)
 			AddSoftScore(profile->steamId, "AimAnalyzer", scoreDelta, "Aim anomaly", profile);
-	}
-
+    }
+    
 	if (m_Config.enable_wallhack_detection && alive && team >= 2)
-		m_WallhackDetector->Analyze(*profile, enemies);
+	{
+        scoreDelta = m_WallhackDetector->Analyze(*profile, enemies);
+		if (scoreDelta > 0.0f)
+			AddSoftScore(profile->steamId, "WallhackDetector", scoreDelta, "Wall track", profile);
+	}
 
 	if (m_Config.enable_movement_detection)
 	{
 		scoreDelta = m_MovementAnalyzer->Analyze(*profile, 0.015f, curtime, team, alive);
 		if (scoreDelta > 0.0f)
-			m_SuspicionScorer->AddScore(profile->steamId, "MovementAnalyzer", scoreDelta, "Movement anomaly");
+			AddSoftScore(profile->steamId, "MovementAnalyzer", scoreDelta, "Movement anomaly", profile);
 	}
 
 	if (m_Config.enable_fps_drop_detection && g_pEngine)
@@ -606,16 +736,16 @@ void AntiCheatCore::ProcessPlayer(PlayerProfile* profile)
 
 	if (m_Config.enable_stats_tracking)
 	{
-		scoreDelta = m_StatisticsTracker->AnalyzeSession(*profile);
+        scoreDelta = m_StatisticsTracker->AnalyzeSession(*profile);
 		if (scoreDelta > 0.0f)
 			m_SuspicionScorer->AddScore(profile->steamId, "StatisticsTracker", scoreDelta, "High statistics");
-	}
-
-	scoreDelta = m_IntegrityChecker->CheckIntegrity(*profile);
+    }
+    
+    scoreDelta = m_IntegrityChecker->CheckIntegrity(*profile);
 	if (scoreDelta > 0.0f)
 		m_SuspicionScorer->AddScore(profile->steamId, "IntegrityChecker", scoreDelta, "Integrity");
 
-	CheckAndApplyActions(profile);
+    CheckAndApplyActions(profile);
 }
 
 void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
@@ -627,7 +757,7 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 
 	// Local MarkBanned = already issued ApplyBan this uptime → never call it again.
 	if (m_SuspicionScorer->IsAlreadyBanned(profile->steamId))
-		return;
+        return; 
 
 	ScorerAction action = m_SuspicionScorer->EvaluatePlayer(*profile);
 
@@ -660,11 +790,34 @@ void AntiCheatCore::CheckAndApplyActions(PlayerProfile* profile)
 	if (action == ScorerAction::BAN && !profile->actionTakenBan)
 	{
 		profile->actionTakenBan = true;
-		profile->isBanned = true;
+        profile->isBanned = true;
 		m_SuspicionScorer->MarkBanned(profile->steamId);
-		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str());
-		AC_Log("auto-ban steam=%llu name=%s score=%.1f (continued after admin warn)",
-			(unsigned long long)profile->steamId, profile->name.c_str(),
-			m_SuspicionScorer->GetScore(profile->steamId));
+		const float banScore = m_SuspicionScorer->GetScore(profile->steamId);
+		const std::string detectReason = m_SuspicionScorer->GetBanReasonTags(profile->steamId);
+		char mapName[96]{};
+		AC_ResolveMapName(mapName, sizeof(mapName));
+		AdminBridge_ApplyBan(profile->steamId, profile->name.c_str(), banScore, mapName[0] ? mapName : nullptr, detectReason.c_str());
+
+		AC_Log("auto-ban steam=%llu name=%s score=%.1f reason=%s",
+			(unsigned long long)profile->steamId, profile->name.c_str(), banScore, detectReason.c_str());
 	}
+}
+
+void AntiCheatCore::SetAdminCheckHold(uint64_t steamId, bool hold)
+{
+	if (!steamId || !m_SuspicionScorer)
+		return;
+
+	m_SuspicionScorer->SetAdminCheckHold(steamId, hold);
+	if (!hold)
+		return;
+
+	m_SuspicionScorer->RetractIssuedBan(steamId);
+	if (PlayerProfile* p = GetPlayerProfile(steamId))
+	{
+		p->actionTakenBan = false;
+		p->isBanned = false;
+	}
+	AC_Log("admin-check hold ON steam=%llu (autoban paused; fast-ban retracted if queued)",
+		(unsigned long long)steamId);
 }

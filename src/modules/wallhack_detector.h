@@ -17,14 +17,18 @@ public:
 
 	void SetConfig(float trackFovDeg, float minTrackDistance, int streakTicksForScore);
 
-	// Per-tick: tracking enemies with tight FOV (possible WH / pre-aim).
+	// Per-tick: FOV lock on distant enemy → soft score on long tracks (possible WH).
 	float Analyze(PlayerProfile& player, const std::vector<PlayerProfile*>& enemies);
 
-	// On kill: smoke / wallbang / blind kills.
+	// On kill: smoke / wallbang / blind / prefire.
 	float OnCombatKill(PlayerProfile& attacker, PlayerProfile& victim, const CombatKillFlags& flags);
 
+	// On hurt: prefire / smoke / wallbang hits (before kill).
+	float OnCombatHurt(PlayerProfile& attacker, PlayerProfile& victim, const CombatKillFlags& flags, bool headshot);
+
 private:
-	float m_trackFovDeg = 4.0f;
-	float m_minTrackDistance = 400.0f;
-	int m_streakTicksForScore = 32; // ~0.5s at 64 tick
+	float m_trackFovDeg = 3.5f;
+	float m_minTrackDistance = 500.0f;
+	int m_streakTicksForScore = 240; // ~3.75s @64 tick
+	int m_trackScoreEveryTicks = 128; // soft score cadence while locked (~2s)
 };

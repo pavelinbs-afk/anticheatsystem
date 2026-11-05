@@ -6,24 +6,25 @@ WallhackDetector::WallhackDetector() = default;
 
 void WallhackDetector::SetConfig(float trackFovDeg, float minTrackDistance, int streakTicksForScore)
 {
-	m_trackFovDeg = trackFovDeg > 0.0f ? trackFovDeg : 3.0f;
-	m_minTrackDistance = minTrackDistance > 0.0f ? minTrackDistance : 800.0f;
-	m_streakTicksForScore = streakTicksForScore > 0 ? streakTicksForScore : 96; // ~1.5s @64
+	m_trackFovDeg = trackFovDeg > 0.0f ? trackFovDeg : 3.5f;
+	m_minTrackDistance = minTrackDistance > 0.0f ? minTrackDistance : 500.0f;
+	m_streakTicksForScore = streakTicksForScore > 0 ? streakTicksForScore : 240;
+	m_trackScoreEveryTicks = 128; // ~2s between hold scores @64 tick
 }
 
 float WallhackDetector::Analyze(PlayerProfile& player, const std::vector<PlayerProfile*>& enemies)
 {
-	// Per-tick FOV lock without EngineTrace false-positives hard (holding an angle is normal).
-	// Only track streak for prefire-on-kill bonus; do NOT add score here.
 	if (enemies.empty() || !IsPlayerAlive(player.slot))
 	{
 		player.wallAimStreak = 0;
 		player.wallAimTargetSteam = 0;
+		player.wallTrackScoreTicks = 0;
 		return 0.0f;
 	}
 
 	float bestFov = 999.0f;
 	uint64_t bestTarget = 0;
+	float bestDist = 0.0f;
 
 	for (const PlayerProfile* enemy : enemies)
 	{
@@ -39,6 +40,7 @@ float WallhackDetector::Analyze(PlayerProfile& player, const std::vector<PlayerP
 		{
 			bestFov = fov;
 			bestTarget = enemy->steamId;
+			bestDist = dist;
 		}
 	}
 
@@ -50,14 +52,36 @@ float WallhackDetector::Analyze(PlayerProfile& player, const std::vector<PlayerP
 		{
 			player.wallAimTargetSteam = bestTarget;
 			player.wallAimStreak = 1;
+			player.wallTrackScoreTicks = 0;
 		}
 	}
 	else
 	{
 		player.wallAimStreak = 0;
 		player.wallAimTargetSteam = 0;
+		player.wallTrackScoreTicks = 0;
+		return 0.0f;
 	}
 
+	// Soft score while holding a tight distant lock (WH pre-aim). Rate-limited.
+	if (player.wallAimStreak < m_streakTicksForScore)
+		return 0.0f;
+
+	player.wallTrackScoreTicks++;
+	if (player.wallTrackScoreTicks == 1)
+	{
+		AC_Log("WH track lock streak=%d fov=%.2f dist=%.0f steam=%llu target=%llu +3",
+			player.wallAimStreak, bestFov, bestDist,
+			(unsigned long long)player.steamId, (unsigned long long)bestTarget);
+		return 3.0f;
+	}
+	if (player.wallTrackScoreTicks > 1 &&
+		(player.wallTrackScoreTicks % m_trackScoreEveryTicks) == 0)
+	{
+		AC_Log("WH track hold streak=%d dist=%.0f steam=%llu +2",
+			player.wallAimStreak, bestDist, (unsigned long long)player.steamId);
+		return 2.0f;
+	}
 	return 0.0f;
 }
 
@@ -68,39 +92,102 @@ float WallhackDetector::OnCombatKill(PlayerProfile& attacker, PlayerProfile& vic
 	if (dist <= 0.0f)
 		dist = VectorDistance(attacker.position, victim.position);
 
-	// Thru-smoke: only HS at range (smoke spray kills are common).
-	if (flags.thrusmoke && flags.headshot && dist >= 500.0f)
+	if (flags.thrusmoke)
 	{
-		suspicionDelta += 5.0f;
-		AC_Log("SMOKE HS dist=%.0f steam=%llu -> %llu +5",
+		if (flags.headshot && dist >= 400.0f)
+		{
+			suspicionDelta += 10.0f;
+			AC_Log("SMOKE HS dist=%.0f steam=%llu -> %llu +10",
+				dist, (unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
+		}
+		else if (dist >= 650.0f)
+		{
+			suspicionDelta += 5.0f;
+			AC_Log("SMOKE kill dist=%.0f steam=%llu -> %llu +5",
+				dist, (unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
+		}
+	}
+
+	if (flags.attackerblind && flags.headshot && dist >= 250.0f)
+	{
+		suspicionDelta += 16.0f;
+		AC_Log("BLIND HS dist=%.0f steam=%llu -> %llu +16",
+			dist, (unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
+	}
+	else if (flags.attackerblind && dist >= 400.0f)
+	{
+		suspicionDelta += 8.0f;
+		AC_Log("BLIND kill dist=%.0f steam=%llu -> %llu +8",
 			dist, (unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
 	}
 
-	// Blind kill: only HS (spray while flashed happens).
-	if (flags.attackerblind && flags.headshot && dist >= 300.0f)
+	if (flags.penetrated >= 2 && flags.headshot && dist >= 550.0f)
 	{
-		suspicionDelta += 12.0f;
-		AC_Log("BLIND HS dist=%.0f steam=%llu -> %llu +12",
-			dist, (unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
+		suspicionDelta += 16.0f;
+		AC_Log("WALLBANG hs pen=%d dist=%.0f steam=%llu +16",
+			flags.penetrated, dist, (unsigned long long)attacker.steamId);
 	}
-
-	// Wallbang: multi-pen + HS + long range only.
-	if (flags.penetrated >= 2 && flags.headshot && dist >= 700.0f)
+	else if (flags.penetrated >= 1 && flags.headshot && dist >= 700.0f)
 	{
-		suspicionDelta += 12.0f;
-		AC_Log("WALLBANG hs pen=%d dist=%.0f steam=%llu +12",
+		suspicionDelta += 10.0f;
+		AC_Log("WALLBANG hs pen=%d dist=%.0f steam=%llu +10",
+			flags.penetrated, dist, (unsigned long long)attacker.steamId);
+	}
+	else if (flags.penetrated >= 2 && dist >= 800.0f)
+	{
+		suspicionDelta += 7.0f;
+		AC_Log("WALLBANG body pen=%d dist=%.0f steam=%llu +7",
 			flags.penetrated, dist, (unsigned long long)attacker.steamId);
 	}
 
-	// Prefire after long distant lock (~1.5s).
 	if (attacker.wallAimTargetSteam == victim.steamId &&
 		attacker.wallAimStreak >= m_streakTicksForScore &&
 		dist >= m_minTrackDistance)
 	{
-		suspicionDelta += 12.0f;
-		AC_Log("prefire-after-lock streak=%d steam=%llu -> %llu +12",
+		const float prefire = attacker.wallAimStreak >= (m_streakTicksForScore * 2) ? 20.0f : 14.0f;
+		suspicionDelta += prefire;
+		AC_Log("prefire-after-lock streak=%d steam=%llu -> %llu +%.0f",
 			attacker.wallAimStreak,
-			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId);
+			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, prefire);
+	}
+
+	return suspicionDelta;
+}
+
+float WallhackDetector::OnCombatHurt(PlayerProfile& attacker, PlayerProfile& victim, const CombatKillFlags& flags, bool headshot)
+{
+	float suspicionDelta = 0.0f;
+	float dist = flags.distance;
+	if (dist <= 0.0f)
+		dist = VectorDistance(attacker.position, victim.position);
+
+	// Prefire hit after distant FOV lock (strong WH signal even without kill).
+	if (attacker.wallAimTargetSteam == victim.steamId &&
+		attacker.wallAimStreak >= m_streakTicksForScore &&
+		dist >= m_minTrackDistance)
+	{
+		const float hitScore = headshot ? 10.0f : 6.0f;
+		suspicionDelta += hitScore;
+		AC_Log("WH prefire-hit streak=%d hs=%d dist=%.0f steam=%llu -> %llu +%.0f",
+			attacker.wallAimStreak, (int)headshot, dist,
+			(unsigned long long)attacker.steamId, (unsigned long long)victim.steamId, hitScore);
+		// Consume part of streak so one spray doesn't stack infinitely.
+		attacker.wallAimStreak = m_streakTicksForScore / 2;
+		attacker.wallTrackScoreTicks = 0;
+	}
+
+	if (flags.thrusmoke && headshot && dist >= 450.0f)
+	{
+		suspicionDelta += 6.0f;
+		AC_Log("SMOKE HS hit dist=%.0f steam=%llu +6",
+			dist, (unsigned long long)attacker.steamId);
+	}
+
+	if (flags.penetrated >= 2 && headshot && dist >= 600.0f)
+	{
+		suspicionDelta += 8.0f;
+		AC_Log("WALLBANG HS hit pen=%d dist=%.0f steam=%llu +8",
+			flags.penetrated, dist, (unsigned long long)attacker.steamId);
 	}
 
 	return suspicionDelta;

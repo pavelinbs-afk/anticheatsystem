@@ -69,6 +69,49 @@ endif()
 
 set(MMS_CORE "${MMS_PATH}/core")
 
+# Bake git metadata into the binary for `ac_status`.
+set(AC_GIT_COMMIT "unknown")
+set(AC_GIT_BRANCH "unknown")
+set(AC_GIT_COMMIT_DATE "unknown")
+set(AC_GIT_COMMIT_SUBJECT "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE AC_GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --abbrev-ref HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE AC_GIT_BRANCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" log -1 --format=%ci
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE AC_GIT_COMMIT_DATE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" log -1 --format=%s
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE AC_GIT_COMMIT_SUBJECT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+endif()
+string(TIMESTAMP AC_BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
+# Escape for compile definitions (quotes in commit subject).
+foreach(_ac_git_var IN ITEMS AC_GIT_COMMIT AC_GIT_BRANCH AC_GIT_COMMIT_DATE AC_GIT_COMMIT_SUBJECT AC_BUILD_TIMESTAMP)
+  string(REPLACE "\\" "\\\\" ${_ac_git_var} "${${_ac_git_var}}")
+  string(REPLACE "\"" "\\\"" ${_ac_git_var} "${${_ac_git_var}}")
+endforeach()
+
 add_library(anticheat_flags INTERFACE)
 
 target_compile_definitions(anticheat_flags INTERFACE
@@ -83,6 +126,11 @@ target_compile_definitions(anticheat_flags INTERFACE
   _vsnprintf=vsnprintf
   HAVE_STDINT_H
   GNUC
+  AC_GIT_COMMIT="${AC_GIT_COMMIT}"
+  AC_GIT_BRANCH="${AC_GIT_BRANCH}"
+  AC_GIT_COMMIT_DATE="${AC_GIT_COMMIT_DATE}"
+  AC_GIT_COMMIT_SUBJECT="${AC_GIT_COMMIT_SUBJECT}"
+  AC_BUILD_TIMESTAMP="${AC_BUILD_TIMESTAMP}"
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -193,6 +241,7 @@ set(AC_PLUGIN_SRCS
   src/vtable_finder.cpp
   src/players.cpp
   src/events.cpp
+  src/commands.cpp
   src/config.cpp
   src/staff_exempt.cpp
   src/anticheat_core.cpp

@@ -62,16 +62,18 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 	if (!s_loggedSchema)
 	{
 		s_loggedSchema = true;
-		AC_Log("schema offs: v_angle=%d eyePawn=%d eyeCtrl=%d absOrigin=%d playerPawn=%d",
+		AC_Log("schema offs: v_angle=%d eyePawn=%d body=%d sceneNode=%d absOrigin=%d playerPawn=%d",
 			Schema_GetOffset("CBasePlayerPawn", "v_angle"),
 			Schema_GetOffset("CCSPlayerPawn", "m_angEyeAngles"),
-			Schema_GetOffset("CCSPlayerController", "m_angEyeAngles"),
+			Schema_GetOffset("CBaseEntity", "m_CBodyComponent"),
+			Schema_GetOffset("CBodyComponent", "m_pSceneNode"),
 			Schema_GetOffset("CGameSceneNode", "m_vecAbsOrigin"),
 			Schema_GetOffset("CCSPlayerController", "m_hPlayerPawn"));
 	}
 
 	Vec3 origin{};
-	void* pNode = Schema_Get<void*>(pPawn, "CBaseEntity", "m_pGameSceneNode");
+	void* pBody = Schema_Get<void*>(pPawn, "CBaseEntity", "m_CBodyComponent", nullptr);
+	void* pNode = pBody ? Schema_Get<void*>(pBody, "CBodyComponent", "m_pSceneNode", nullptr) : nullptr;
 	if (pNode)
 		origin = Schema_Get<Vec3>(pNode, "CGameSceneNode", "m_vecAbsOrigin");
 
@@ -97,12 +99,6 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 			Ang pawnEye = Schema_Get<Ang>(pPawn, "CCSPlayerPawn", "m_angEyeAngles");
 			if (pawnEye.pitch != 0.0f || pawnEye.yaw != 0.0f)
 				eye = pawnEye;
-			else
-			{
-				Ang ctrl = Schema_Get<Ang>(pController, "CCSPlayerController", "m_angEyeAngles");
-				if (ctrl.pitch != 0.0f || ctrl.yaw != 0.0f)
-					eye = ctrl;
-			}
 		}
 
 		outAngles[0] = eye.pitch;

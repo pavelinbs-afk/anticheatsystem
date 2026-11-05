@@ -67,12 +67,12 @@ struct PlayerProfile {
     AcVec3 position;
     AcVec3 lastPosition;
     AcVec3 velocity;
-    std::deque<AcVec3> positionHistory;
+    int movementSpeedStreak = 0; // sustained overspeed frames before scoring
 
-    // === View Angles (last 128 ticks) ===
+    // === View Angles ===
     AcAngle viewAngles;
     AcAngle lastViewAngles;
-    std::deque<AcAngle> angleHistory;
+    // Compact ring for snap-return (owned only by SampleAllPlayers)
     std::deque<float> angleDeltaHistory;
 
     // === Movement State ===
@@ -103,8 +103,8 @@ struct PlayerProfile {
     float accuracy = 0.0f;
     float adr = 0.0f;
 
-    // === Per-Round Stats ===
-    std::map<int, int> killsPerRound;
+    // === Per-Round Stats (cleared each round — avoid unbounded growth) ===
+    int killsThisRound = 0;
 
     // === Historical Data (from MySQL) ===
     float previousSessionKD = 0.0f;
@@ -127,6 +127,7 @@ struct PlayerProfile {
     // Wallhack / pre-aim tracking (FOV lock on enemy)
     int wallAimStreak = 0;
     uint64_t wallAimTargetSteam = 0;
+    int wallTrackScoreTicks = 0; // cadence for soft WH-track score while locked
 
     // Movement / spawn guards (team change, death, join → ignore speed for a bit)
     int lastTeamNum = 0;
@@ -141,6 +142,16 @@ struct PlayerProfile {
     bool hasLastShotAngles = false;
     int aimbotHitStreak = 0;
     int silentAimHits = 0;
+    // Medium fire-time snap → score only if matched hurt confirms (reduces look-around FP)
+    float pendingRageSnapDeg = 0.0f;
+    float pendingRageSnapUntil = 0.0f;
+    uint64_t pendingRageSnapTarget = 0;
+
+    // Backend-check sticky: retry when IP arrives / AdminPlugin late
+    bool backendCheckDone = false;
+    bool backendCheckPending = false;
+    int backendCheckAttempts = 0;
+    float backendCheckNextAt = 0.0f;
 
     // === CS2AC-inspired combat / network state ===
     float crosshairOnEnemySince = 0.0f;
@@ -156,8 +167,9 @@ struct PlayerProfile {
     float aimlockTravelAccum = 0.0f;
     float aimlockStartDist = 0.0f;
     AcVec3 aimlockLastTargetPos;
-    int aimlockEpisodes = 0;
-    int aimedShots = 0;
+	int aimlockEpisodes = 0;
+	int aimlockOffTicks = 0; // soft-decay brief FOV breaks
+	int aimedShots = 0;
     int aimedHits = 0;
     bool inhumanAccuracyFlagged = false;
     bool networkUnsafe = false;

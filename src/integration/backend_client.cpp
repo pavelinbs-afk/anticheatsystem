@@ -8,6 +8,59 @@
 #include <thread>
 #include <chrono>
 #include <array>
+#include <unistd.h>
+
+static bool PathIsExecutable(const char* path)
+{
+	return path && path[0] && access(path, X_OK) == 0;
+}
+
+static int RunPipedCommand(const std::string& cmd, std::string& out)
+{
+	out.clear();
+	FILE* pipe = popen(cmd.c_str(), "r");
+	if (!pipe)
+		return -1;
+	std::array<char, 512> buf{};
+	while (fgets(buf.data(), (int)buf.size(), pipe))
+		out += buf.data();
+	return pclose(pipe);
+}
+
+static std::string ShellSingleQuote(const std::string& s)
+{
+	std::string out = "'";
+	for (char c : s)
+	{
+		if (c == '\'')
+			out += "'\\''";
+		else
+			out.push_back(c);
+	}
+	out.push_back('\'');
+	return out;
+}
+
+static std::string DiscoverBin(const char* name)
+{
+	static const char* prefixes[] = { "/usr/bin/", "/bin/", "/usr/local/bin/" };
+	for (const char* pref : prefixes)
+	{
+		std::string p = std::string(pref) + name;
+		if (PathIsExecutable(p.c_str()))
+			return p;
+	}
+	std::string out;
+	std::string cmd = std::string("command -v ") + name + " 2>/dev/null";
+	if (RunPipedCommand(cmd, out) == 0)
+	{
+		while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
+			out.pop_back();
+		if (!out.empty())
+			return out;
+	}
+	return {};
+}
 
 void BackendClient::SetConfig(const std::string& baseUrl, const std::string& bearerToken, bool enabled)
 {
@@ -21,7 +74,14 @@ void BackendClient::SetConfig(const std::string& baseUrl, const std::string& bea
 	{
 		m_workerStarted = true;
 		std::thread([this]() { WorkerMain(this); }).detach();
-		AC_Log("backend client enabled url=%s", m_baseUrl.c_str());
+
+		const bool hasCurl = !DiscoverBin("curl").empty();
+		const bool hasWget = !DiscoverBin("wget").empty();
+		const bool hasPy = !DiscoverBin("python3").empty() || !DiscoverBin("python").empty();
+		AC_Log("backend client enabled url=%s tools=curl:%d wget:%d python:%d",
+			m_baseUrl.c_str(), (int)hasCurl, (int)hasWget, (int)hasPy);
+		if (!hasCurl && !hasWget && !hasPy)
+			AC_Log("backend check WARNING: no curl/wget/python3 — IP/bypass checks will fail");
 	}
 	else if (!IsEnabled())
 	{
@@ -147,6 +207,77 @@ static int CountOccurrences(const std::string& hay, const char* needle)
 	return n;
 }
 
+static bool TryHttpGet(const std::string& url, const std::string& token, std::string& body, std::string& via)
+{
+	body.clear();
+	via.clear();
+	const std::string auth = std::string("Authorization: Bearer ") + token;
+	const std::string urlQ = ShellSingleQuote(url);
+	const std::string authQ = ShellSingleQuote(auth);
+	std::string lastErr = "no_http_tool";
+
+	auto tryCmd = [&](const char* name, const std::string& cmd) -> bool
+	{
+		std::string out;
+		const int rc = RunPipedCommand(cmd, out);
+		if (rc == 0 && !out.empty())
+		{
+			body = std::move(out);
+			via = name;
+			return true;
+		}
+		lastErr = std::string(name) + "_failed";
+		return false;
+	};
+
+	std::string curl = DiscoverBin("curl");
+	if (!curl.empty())
+	{
+		std::string cmd = ShellSingleQuote(curl) + " -sS --max-time 5 -H " + authQ + " " + urlQ + " 2>/dev/null";
+		if (tryCmd("curl", cmd))
+			return true;
+	}
+
+	std::string wget = DiscoverBin("wget");
+	if (!wget.empty())
+	{
+		std::string cmd = ShellSingleQuote(wget) + " -q -T 5 -O - --header=" + authQ + " " + urlQ + " 2>/dev/null";
+		if (tryCmd("wget", cmd))
+			return true;
+	}
+
+	std::string py = DiscoverBin("python3");
+	if (py.empty())
+		py = DiscoverBin("python");
+	if (!py.empty())
+	{
+		char envTok[40];
+		char envUrl[40];
+		std::snprintf(envTok, sizeof(envTok), "AC_BEARER_%d", (int)getpid());
+		std::snprintf(envUrl, sizeof(envUrl), "AC_URL_%d", (int)getpid());
+		setenv(envTok, token.c_str(), 1);
+		setenv(envUrl, url.c_str(), 1);
+
+		char pyCmd[1024];
+		std::snprintf(pyCmd, sizeof(pyCmd),
+			"%s -c \"import os,urllib.request;"
+			"tok=os.environ[%s];u=os.environ[%s];"
+			"req=urllib.request.Request(u,headers={'Authorization':'Bearer '+tok});"
+			"print(urllib.request.urlopen(req,timeout=5).read().decode())\" 2>/dev/null",
+			ShellSingleQuote(py).c_str(),
+			ShellSingleQuote(envTok).c_str(),
+			ShellSingleQuote(envUrl).c_str());
+		const bool ok = tryCmd("python3", pyCmd);
+		unsetenv(envTok);
+		unsetenv(envUrl);
+		if (ok)
+			return true;
+	}
+
+	via = lastErr;
+	return false;
+}
+
 BackendCheckResult BackendClient::PerformHttp(const BackendCheckRequest& req) const
 {
 	BackendCheckResult r;
@@ -162,27 +293,11 @@ BackendCheckResult BackendClient::PerformHttp(const BackendCheckRequest& req) co
 		(unsigned long long)req.steamId,
 		req.clientIp.empty() ? "" : req.clientIp.c_str());
 
-	// curl is present on CS2 Linux hosts; avoids linking libcurl into the .so.
-	char cmd[1400];
-	std::snprintf(cmd, sizeof(cmd),
-		"curl -sS --max-time 5 -H \"Authorization: Bearer %s\" \"%s\" 2>/dev/null",
-		m_token.c_str(), url);
-
-	FILE* pipe = popen(cmd, "r");
-	if (!pipe)
-	{
-		r.rawError = "popen_failed";
-		return r;
-	}
-
 	std::string body;
-	std::array<char, 512> buf{};
-	while (fgets(buf.data(), (int)buf.size(), pipe))
-		body += buf.data();
-	const int rc = pclose(pipe);
-	if (rc != 0 && body.empty())
+	std::string via;
+	if (!TryHttpGet(url, m_token, body, via))
 	{
-		r.rawError = "curl_failed";
+		r.rawError = via.empty() ? "http_failed" : via;
 		return r;
 	}
 
@@ -193,10 +308,10 @@ BackendCheckResult BackendClient::PerformHttp(const BackendCheckRequest& req) co
 	r.exactIpLinked = CountOccurrences(body, "\"match\":\"exact\"");
 	r.prefixIpLinked = CountOccurrences(body, "\"match\":\"prefix24\"");
 
-	AC_Log("backend check steam=%llu ip=%s banned=%d enforce=%d exactIp=%d /24=%d reason=%s",
+	AC_Log("backend check steam=%llu ip=%s banned=%d enforce=%d exactIp=%d /24=%d reason=%s via=%s",
 		(unsigned long long)r.steamId, r.clientIp.c_str(),
 		(int)r.steamBanned, (int)r.shouldEnforce, r.exactIpLinked, r.prefixIpLinked,
-		r.enforceReason.c_str());
+		r.enforceReason.c_str(), via.c_str());
 
 	return r;
 }

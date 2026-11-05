@@ -32,6 +32,7 @@ class BackendClient {
 public:
 	void SetConfig(const std::string& baseUrl, const std::string& bearerToken, bool enabled);
 	bool IsEnabled() const { return m_enabled && !m_baseUrl.empty() && !m_token.empty(); }
+	const std::string& GetBaseUrl() const { return m_baseUrl; }
 
 	void RequestCheck(const BackendCheckRequest& req);
 	void PollResults(std::vector<BackendCheckResult>& out);

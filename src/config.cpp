@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -178,7 +179,11 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "warn_threshold", d)) cfg.warn_threshold = (float)d;
 	if (JsonFindNumber(json, "report_threshold", d)) cfg.report_threshold = (float)d;
 	if (JsonFindNumber(json, "kick_threshold", d)) cfg.report_threshold = (float)d; // legacy name
+	if (JsonFindNumber(json, "admin_warn_threshold", d)) cfg.admin_warn_threshold = (float)d;
 	if (JsonFindNumber(json, "ban_threshold", d)) cfg.ban_threshold = (float)d;
+	if (JsonFindNumber(json, "fast_ban_threshold", d)) cfg.fast_ban_threshold = (float)d;
+	if (JsonFindNumber(json, "fast_ban_window_sec", d)) cfg.fast_ban_window_sec = (float)d;
+	if (JsonFindNumber(json, "fast_ban_window_seconds", d)) cfg.fast_ban_window_sec = (float)d;
 	if (JsonFindNumber(json, "duration_days", d)) cfg.ban_duration_days = (int)d;
 	if (JsonFindNumber(json, "score_decay_per_minute", d)) cfg.score_decay_per_second = (float)(d / 60.0);
 	if (JsonFindBool(json, "bhop_detection", b)) cfg.enable_bhop_detection = b;
@@ -201,6 +206,7 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 	if (JsonFindNumber(json, "shot_min_hit_distance", d)) cfg.shot_min_hit_distance = (float)d;
 	if (JsonFindNumber(json, "shot_min_shots_before_score", d)) cfg.shot_min_shots_before_score = (int)d;
 	if (JsonFindBool(json, "enable_backend_check", b)) cfg.enable_backend_check = b;
+	if (JsonFindBool(json, "enable_debug_log", b)) cfg.enable_debug_log = b;
 	{
 		std::string s;
 		if (JsonFindString(json, "backend_api_url", s)) cfg.backend_api_url = s;
@@ -208,8 +214,9 @@ AntiCheatConfig AntiCheatConfig::LoadFromFile(const std::string& filepath)
 		if (JsonFindString(json, "reason", s)) cfg.ban_reason = s;
 	}
 
-	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f snap>=%.0f backend=%d)",
+	AC_SetDebugLog(cfg.enable_debug_log);
+	AC_Log("config loaded from %s (ban>=%.0f report>=%.0f snap>=%.0f backend=%d debug=%d)",
 		usedPath.c_str(), cfg.ban_threshold, cfg.report_threshold,
-		cfg.snap_angle_threshold, (int)cfg.enable_backend_check);
+		cfg.snap_angle_threshold, (int)cfg.enable_backend_check, (int)cfg.enable_debug_log);
 	return cfg;
 }
