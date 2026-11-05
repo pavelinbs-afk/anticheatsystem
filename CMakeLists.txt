@@ -106,10 +106,13 @@ if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
   )
 endif()
 string(TIMESTAMP AC_BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
-# Escape for compile definitions (quotes in commit subject).
+# Escape for compile definitions. ';' is CMake's list separator — must not appear raw.
 foreach(_ac_git_var IN ITEMS AC_GIT_COMMIT AC_GIT_BRANCH AC_GIT_COMMIT_DATE AC_GIT_COMMIT_SUBJECT AC_BUILD_TIMESTAMP)
   string(REPLACE "\\" "\\\\" ${_ac_git_var} "${${_ac_git_var}}")
   string(REPLACE "\"" "\\\"" ${_ac_git_var} "${${_ac_git_var}}")
+  string(REPLACE ";" "," ${_ac_git_var} "${${_ac_git_var}}")
+  string(REPLACE "\n" " " ${_ac_git_var} "${${_ac_git_var}}")
+  string(REPLACE "\r" "" ${_ac_git_var} "${${_ac_git_var}}")
 endforeach()
 
 add_library(anticheat_flags INTERFACE)
