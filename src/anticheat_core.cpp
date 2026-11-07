@@ -392,27 +392,17 @@ void AntiCheatCore::QueueBackendCheck(PlayerProfile* profile)
 	if (!profile || !m_Config.enable_backend_check)
 		return;
 
-	std::string ip = profile->ipAddress.empty() ? GetClientIpForSlot(profile->slot) : profile->ipAddress;
-	if (profile->ipAddress.empty() && !ip.empty())
-		profile->ipAddress = ip;
+	// Defer: PutInServer during changelevel/reconnect often has no IP and unstable entities.
+	// Actual ServerCommand is issued later from SampleAllPlayers when IP is known.
+	if (profile->ipAddress.empty())
+		profile->ipAddress = GetClientIpForSlot(profile->slot);
 
 	CGlobalVars* gv = GetGlobals();
 	const float now = gv ? gv->curtime : 0.0f;
-	AdminBridge_BackendCheck(profile->steamId, ip.c_str(), profile->name.c_str());
-
-	if (ip.empty())
-	{
-		// IP often arrives a beat late — keep sticky retries until we have it.
-		profile->backendCheckPending = true;
-		profile->backendCheckDone = false;
-		profile->backendCheckAttempts = 1;
-		profile->backendCheckNextAt = now + 2.0f;
-	}
-	else
-	{
-		profile->backendCheckDone = true;
-		profile->backendCheckPending = false;
-	}
+	profile->backendCheckPending = true;
+	profile->backendCheckDone = false;
+	profile->backendCheckAttempts = 0;
+	profile->backendCheckNextAt = now + 3.0f;
 }
 
 void AntiCheatCore::ProcessBackendResults()
@@ -659,9 +649,48 @@ void AntiCheatCore::OnWeaponFire(int shooterSlot)
 
 void AntiCheatCore::SampleAllPlayers()
 {
+	CGlobalVars* gv = GetGlobals();
+	const float now = gv ? gv->curtime : 0.0f;
+
 	for (auto& [steamID, profile] : m_PlayerProfiles)
 	{
 		(void)steamID;
+
+		if (profile->ipAddress.empty())
+			profile->ipAddress = GetClientIpForSlot(profile->slot);
+
+		// Sticky backend-check: wait for IP, one-shot (no ServerCommand retry spam).
+		if (m_Config.enable_backend_check && profile->backendCheckPending && !profile->backendCheckDone
+			&& now >= profile->backendCheckNextAt)
+		{
+			const bool haveIp = !profile->ipAddress.empty();
+			if (haveIp)
+			{
+				AdminBridge_BackendCheck(profile->steamId, profile->ipAddress.c_str(), profile->name.c_str());
+				profile->backendCheckDone = true;
+				profile->backendCheckPending = false;
+			}
+			else
+			{
+				profile->backendCheckAttempts++;
+				if (profile->backendCheckAttempts >= 5)
+				{
+					profile->backendCheckDone = true;
+					profile->backendCheckPending = false;
+					AC_Log("backend-check skipped steam=%llu (no IP after retries)",
+						(unsigned long long)profile->steamId);
+				}
+				else
+				{
+					profile->backendCheckNextAt = now + 2.0f;
+				}
+			}
+		}
+
+		// Skip pawn schema reads during join/changelevel grace — prevents segfault on stale body/node.
+		if (profile->movementIgnoreUntil > 0.0f && now < profile->movementIgnoreUntil)
+			continue;
+
 		float pos[3]{}, ang[3]{}, vel[3]{};
 		if (!SamplePlayerState(profile->slot, pos, ang, vel))
 			continue;
@@ -681,31 +710,6 @@ void AntiCheatCore::SampleAllPlayers()
 
 		// Air heuristic: vertical velocity
 		profile->inAir = std::fabs(profile->velocity.z) > 20.0f;
-
-		if (profile->ipAddress.empty())
-			profile->ipAddress = GetClientIpForSlot(profile->slot);
-
-		// Sticky backend-check: retry when IP arrives or AdminPlugin may have been late.
-		if (m_Config.enable_backend_check && profile->backendCheckPending && !profile->backendCheckDone)
-		{
-			CGlobalVars* gv = GetGlobals();
-			const float now = gv ? gv->curtime : 0.0f;
-			if (now >= profile->backendCheckNextAt)
-			{
-				const bool haveIp = !profile->ipAddress.empty();
-				AdminBridge_BackendCheck(profile->steamId, profile->ipAddress.c_str(), profile->name.c_str());
-				profile->backendCheckAttempts++;
-				if (haveIp || profile->backendCheckAttempts >= 5)
-				{
-					profile->backendCheckDone = true;
-					profile->backendCheckPending = false;
-				}
-				else
-				{
-					profile->backendCheckNextAt = now + 2.0f;
-				}
-			}
-		}
 	}
 }
 

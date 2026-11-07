@@ -121,16 +121,16 @@ void DispatchOne(const PendingBridge& p)
 		AC_Log("bridge admin-warn -> %s", cmd);
 		break;
 	case BridgeKind::BackendCheck:
-		if (p.name[0] && p.ip[0])
+		// Require IP — bare steamid checks spam AdminPlugin during reconnect storms.
+		if (!p.ip[0])
+			return;
+		if (p.name[0])
 			std::snprintf(cmd, sizeof(cmd), "css_anticheat_backend_check %llu \"%s\" \"%s\"\n",
 				(unsigned long long)p.steamId, p.ip, p.name);
-		else if (p.ip[0])
+		else
 			std::snprintf(cmd, sizeof(cmd), "css_anticheat_backend_check %llu \"%s\"\n",
 				(unsigned long long)p.steamId, p.ip);
-		else
-			std::snprintf(cmd, sizeof(cmd), "css_anticheat_backend_check %llu\n",
-				(unsigned long long)p.steamId);
-		AC_Log("bridge backend-check -> %s", cmd);
+		AC_LogDebug("bridge backend-check -> %s", cmd);
 		break;
 	case BridgeKind::DiscordNotify:
 	{
@@ -277,11 +277,25 @@ void AdminBridge_DiscordTest()
 
 void AdminBridge_BackendCheck(uint64_t steamId, const char* clientIp, const char* playerName)
 {
+	if (steamId == 0 || !clientIp || !clientIp[0])
+		return;
+
+	// Dedupe: one in-flight backend-check per steam (avoid reconnect storms stacking retries).
+	for (const PendingBridge& existing : g_pending)
+	{
+		if (existing.kind == BridgeKind::BackendCheck && existing.steamId == steamId)
+			return;
+	}
+
 	PendingBridge p;
 	p.kind = BridgeKind::BackendCheck;
 	p.steamId = steamId;
 	EscapeForCommand(clientIp, p.ip, sizeof(p.ip));
 	EscapeForCommand(playerName, p.name, sizeof(p.name));
+	if (!p.ip[0])
+		return;
+
 	CGlobalVars* gv = GetGlobals();
-	Enqueue(p, gv ? gv->curtime : 0.0f, kDefaultRetries);
+	// One-shot only — sticky retries live in AntiCheatCore, not ServerCommand spam.
+	Enqueue(p, gv ? gv->curtime : 0.0f, /*retries=*/0);
 }

@@ -3,6 +3,8 @@
 #include "plugin.h"
 #include "schema.h"
 
+#include <cmath>
+
 CEntityInstance* GetControllerBySlot(int iSlot)
 {
 	if (!g_pGameEntitySystem || iSlot < 0 || iSlot >= AC_MAXPLAYERS)
@@ -59,23 +61,43 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 	struct Ang { float pitch, yaw, roll; }; // QAngle: x=pitch, y=yaw, z=roll
 
 	static bool s_loggedSchema = false;
-	if (!s_loggedSchema)
+	static int32_t s_offBody = -2;
+	static int32_t s_offNode = -2;
+	static int32_t s_offOrigin = -2;
+	static int32_t s_offVAngle = -2;
+	static int32_t s_offEye = -2;
+	static int32_t s_offVel = -2;
+	if (s_offBody == -2)
 	{
-		s_loggedSchema = true;
-		AC_Log("schema offs: v_angle=%d eyePawn=%d body=%d sceneNode=%d absOrigin=%d playerPawn=%d",
-			Schema_GetOffset("CBasePlayerPawn", "v_angle"),
-			Schema_GetOffset("CCSPlayerPawn", "m_angEyeAngles"),
-			Schema_GetOffset("CBaseEntity", "m_CBodyComponent"),
-			Schema_GetOffset("CBodyComponent", "m_pSceneNode"),
-			Schema_GetOffset("CGameSceneNode", "m_vecAbsOrigin"),
-			Schema_GetOffset("CCSPlayerController", "m_hPlayerPawn"));
+		s_offBody = Schema_GetOffset("CBaseEntity", "m_CBodyComponent");
+		s_offNode = Schema_GetOffset("CBodyComponent", "m_pSceneNode");
+		s_offOrigin = Schema_GetOffset("CGameSceneNode", "m_vecAbsOrigin");
+		s_offVAngle = Schema_GetOffset("CBasePlayerPawn", "v_angle");
+		s_offEye = Schema_GetOffset("CCSPlayerPawn", "m_angEyeAngles");
+		s_offVel = Schema_GetOffset("CBaseEntity", "m_vecAbsVelocity");
+		if (!s_loggedSchema)
+		{
+			s_loggedSchema = true;
+			AC_Log("schema offs: v_angle=%d eyePawn=%d body=%d sceneNode=%d absOrigin=%d playerPawn=%d",
+				s_offVAngle, s_offEye, s_offBody, s_offNode, s_offOrigin,
+				Schema_GetOffset("CCSPlayerController", "m_hPlayerPawn"));
+		}
 	}
+
+	// Missing schema → refuse rather than dereference garbage.
+	if (s_offBody < 0 || s_offNode < 0 || s_offOrigin < 0)
+		return false;
 
 	Vec3 origin{};
 	void* pBody = Schema_Get<void*>(pPawn, "CBaseEntity", "m_CBodyComponent", nullptr);
-	void* pNode = pBody ? Schema_Get<void*>(pBody, "CBodyComponent", "m_pSceneNode", nullptr) : nullptr;
-	if (pNode)
-		origin = Schema_Get<Vec3>(pNode, "CGameSceneNode", "m_vecAbsOrigin");
+	if (!pBody)
+		return false;
+	void* pNode = Schema_Get<void*>(pBody, "CBodyComponent", "m_pSceneNode", nullptr);
+	if (!pNode)
+		return false;
+	origin = Schema_Get<Vec3>(pNode, "CGameSceneNode", "m_vecAbsOrigin");
+	if (!std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z))
+		return false;
 
 	// Eye height — FOV from feet origin breaks pitch checks.
 	// m_vecViewOffset is a networked quantized type; use standing fallback.
@@ -90,16 +112,20 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 
 	if (outAngles)
 	{
-		// v_angle = server view/cmd angles (best for aimbot snap detection).
-		Ang eye = Schema_Get<Ang>(pPawn, "CBasePlayerPawn", "v_angle");
+		Ang eye{};
+		if (s_offVAngle >= 0)
+			eye = Schema_Get<Ang>(pPawn, "CBasePlayerPawn", "v_angle");
 		const bool vAngleZero = (eye.pitch == 0.0f && eye.yaw == 0.0f);
 
-		if (vAngleZero)
+		if (vAngleZero && s_offEye >= 0)
 		{
 			Ang pawnEye = Schema_Get<Ang>(pPawn, "CCSPlayerPawn", "m_angEyeAngles");
 			if (pawnEye.pitch != 0.0f || pawnEye.yaw != 0.0f)
 				eye = pawnEye;
 		}
+
+		if (!std::isfinite(eye.pitch) || !std::isfinite(eye.yaw) || !std::isfinite(eye.roll))
+			return false;
 
 		outAngles[0] = eye.pitch;
 		outAngles[1] = eye.yaw;
@@ -108,7 +134,11 @@ bool SamplePlayerState(int iSlot, float* outPos, float* outAngles, float* outVel
 
 	if (outVel)
 	{
-		Vec3 vel = Schema_Get<Vec3>(pPawn, "CBaseEntity", "m_vecAbsVelocity");
+		Vec3 vel{};
+		if (s_offVel >= 0)
+			vel = Schema_Get<Vec3>(pPawn, "CBaseEntity", "m_vecAbsVelocity");
+		if (!std::isfinite(vel.x) || !std::isfinite(vel.y) || !std::isfinite(vel.z))
+			return false;
 		outVel[0] = vel.x;
 		outVel[1] = vel.y;
 		outVel[2] = vel.z;
